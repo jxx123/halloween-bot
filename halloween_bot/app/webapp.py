@@ -26,7 +26,10 @@ from urllib.parse import parse_qs, urlparse
 import cv2
 import numpy as np
 
-from agents import abort_current, agent_names, get_agent
+try:
+    from .agents import abort_current, agent_names, get_agent  # package mode (-m)
+except ImportError:
+    from agents import abort_current, agent_names, get_agent  # script mode
 
 PORT = 8500
 ROBOT_API = "http://127.0.0.1:8399"
