@@ -1,0 +1,14 @@
+# secrets — real API keys live only on the machine
+halloween_bot/app/tts_config.json
+
+# runtime state
+halloween_bot/app/watch_config.json
+outputs/
+*.log
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/

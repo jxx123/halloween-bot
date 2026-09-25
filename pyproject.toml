@@ -1,0 +1,31 @@
+[project]
+name = "halloween-bot"
+version = "0.1.0"
+description = "Trick-or-treat robot: bimanual SO101 arms, a talking pumpkin face, and a Claude agent brain"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    # lerobot provides the SO101 drivers (so_follower / bi_so_follower), cameras,
+    # calibration, policy runtimes, and remote inference (policy_server/robot_client)
+    "lerobot[smolvla,async,feetech]>=0.6.1",
+    "opencv-python>=4.9",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# policy evaluation / rollouts against Hub checkpoints
+eval = ["lerobot[dataset]>=0.6.1"]
+
+[project.scripts]
+halloween-server = "halloween_bot.server:main"
+halloween-webapp = "halloween_bot.app.webapp:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["halloween_bot*"]
+
+[tool.setuptools.package-data]
+"halloween_bot.app" = ["static/*.html", "persona.md"]

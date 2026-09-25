@@ -1,0 +1,262 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Face</title>
+<style>
+  :root {
+    --bg:#06090f; --iris:#39d5ff; --glow:rgba(57,213,255,.55);
+    --mouth:#39d5ff; --cheek:rgba(57,213,255,.12);
+  }
+  body.halloween {
+    --bg:#050505; --iris:#ff9a1f; --glow:rgba(255,154,31,.55);
+    --mouth:#ff9a1f; --cheek:rgba(255,154,31,.14);
+  }
+  * { margin:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; }
+  body { background:var(--bg); display:flex; align-items:center; justify-content:center;
+         cursor:pointer; font-family:ui-sans-serif, system-ui; user-select:none; }
+
+  #face { width:min(92vw,160vh); height:min(80vh,100vw); position:relative;
+          display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8vh; }
+
+  .eyes { display:flex; gap:18vw; }
+  .eye { width:16vw; height:16vw; max-width:26vh; max-height:26vh; position:relative;
+         background:radial-gradient(circle at 50% 45%, var(--iris), transparent 72%);
+         border-radius:48%; filter:drop-shadow(0 0 4vh var(--glow));
+         transition:transform .35s ease, border-radius .35s ease; }
+  .eye .pupil { position:absolute; left:50%; top:50%; width:46%; height:46%;
+                transform:translate(-50%,-50%); background:var(--bg); border-radius:50%;
+                transition:transform .3s ease, width .3s, height .3s; }
+  .eye .lid { position:absolute; inset:-2%; background:var(--bg); border-radius:48%;
+              transform:scaleY(0); transform-origin:top; transition:transform .09s ease-in; }
+
+  .cheeks { position:absolute; width:100%; top:52%; display:flex; justify-content:space-between; padding:0 4vw; }
+  .cheek { width:9vw; height:4vw; border-radius:50%; background:var(--cheek); filter:blur(1.2vw);
+           opacity:0; transition:opacity .5s; }
+
+  #mouthbox { height:16vh; display:flex; align-items:center; }
+  #mouth { filter:drop-shadow(0 0 3vh var(--glow)); }
+  #mouth path { stroke:var(--mouth); stroke-width:7; fill:none; stroke-linecap:round;
+                stroke-linejoin:round; transition:d .25s; }
+  #mouth path.fill { fill:var(--mouth); stroke:none; }
+
+  /* expression modifiers */
+  body[data-x="listening"] .eye { transform:scale(1.12); }
+  body[data-x="thinking"]  .eye .pupil { transform:translate(-28%,-78%); }
+  body[data-x="thinking"]  .eye:last-child .pupil { transform:translate(-72%,-78%); }
+  body[data-x="working"]   .eye { border-radius:50% 50% 42% 42%; }
+  body[data-x="happy"]     .eye { transform:scaleY(.42) translateY(28%); border-radius:50% 50% 8% 8%; }
+  body[data-x="happy"]     .cheek { opacity:1; }
+  body[data-x="talking"]   .cheek { opacity:.7; }
+  body[data-x="sad"]       .eye { transform:rotate(-8deg) scaleY(.75); }
+  body[data-x="sad"]       .eye:last-child { transform:rotate(8deg) scaleY(.75); }
+  body[data-x="surprised"] .eye { transform:scale(1.3); }
+  body[data-x="surprised"] .eye .pupil { width:30%; height:30%; }
+
+  body.halloween .eye { border-radius:14% 50% 50% 50%; }
+  body.halloween .eye:last-child { border-radius:50% 14% 50% 50%; }
+
+  #hud { position:fixed; bottom:18px; right:18px; display:flex; gap:10px; opacity:.25;
+         transition:opacity .3s; }
+  #hud:hover { opacity:1; }
+  #hud button { background:rgba(255,255,255,.06); color:#9fb6c4; border:1px solid rgba(255,255,255,.15);
+                border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  #hud button.on { color:var(--iris); border-color:var(--iris); }
+  #caption { position:fixed; bottom:16px; left:0; right:0; text-align:center; color:#c9d7e0;
+             font-size:3.2vh; text-shadow:0 0 10px #000; padding:0 10vw; pointer-events:none; }
+  #pumpkins { position:fixed; inset:0; pointer-events:none; display:none; }
+  body.halloween #pumpkins { display:block; }
+  .pk { position:absolute; font-size:5vh; animation:float 9s infinite ease-in-out; opacity:.5; }
+  @keyframes float { 0%,100%{ transform:translateY(0) rotate(-8deg);} 50%{ transform:translateY(-4vh) rotate(8deg);} }
+</style>
+</head>
+<body data-x="idle">
+<div id="face">
+  <div class="cheeks"><div class="cheek"></div><div class="cheek"></div></div>
+  <div class="eyes">
+    <div class="eye"><div class="pupil"></div><div class="lid"></div></div>
+    <div class="eye"><div class="pupil"></div><div class="lid"></div></div>
+  </div>
+  <div id="mouthbox">
+    <svg id="mouth" width="360" height="120" viewBox="0 0 360 120"><path id="mp" d=""/></svg>
+  </div>
+</div>
+<div id="pumpkins"></div>
+<div id="caption"></div>
+<div id="hud">
+  <button id="mic" title="voice input">🎤</button>
+  <button id="tts" title="speech output" class="on">🔊</button>
+  <button id="fs" title="fullscreen">⛶</button>
+</div>
+<script>
+const qs = new URLSearchParams(location.search);
+if (qs.get('theme') === 'halloween') {
+  document.body.classList.add('halloween');
+  const pks = document.getElementById('pumpkins');
+  for (let i = 0; i < 6; i++) {
+    const s = document.createElement('span'); s.className = 'pk'; s.textContent = '🎃';
+    s.style.left = (5 + Math.random()*90) + 'vw'; s.style.top = (5 + Math.random()*85) + 'vh';
+    s.style.animationDelay = (Math.random()*9) + 's'; pks.append(s);
+  }
+}
+
+// ---------- mouth shapes ----------
+const shapes = {
+  idle:      'M60,60 Q180,95 300,60',
+  listening: 'M80,60 Q180,80 280,60',
+  thinking:  'M110,70 Q180,60 250,74',
+  working:   'M130,65 a50,32 0 1,0 100,0 a50,32 0 1,0 -100,0',
+  happy:     'M50,45 Q180,125 310,45',
+  talking:   'M90,60 Q180,90 270,60',
+  sad:       'M70,85 Q180,35 290,85',
+  surprised: 'M140,60 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0',
+};
+const zigzag = 'M40,55 L80,85 L120,55 L160,85 L200,55 L240,85 L280,55 L320,85';
+const mp = document.getElementById('mp');
+let expression = 'idle', speaking = false;
+
+function setX(x) {
+  expression = x;
+  document.body.dataset.x = x;
+  const hallow = document.body.classList.contains('halloween');
+  mp.setAttribute('d', (hallow && (x === 'idle' || x === 'happy')) ? zigzag : (shapes[x] || shapes.idle));
+}
+setX('idle');
+
+// talking mouth oscillation
+let t = 0;
+setInterval(() => {
+  if (!speaking && expression !== 'talking') return;
+  t += 1;
+  const h = 60 + Math.sin(t * 1.7) * 22 + Math.random() * 8;
+  mp.setAttribute('d', `M100,58 Q180,${h + 30} 260,58 Q180,${118 - h} 100,58`);
+}, 90);
+
+// blinking + pupil wander in idle
+const lids = [...document.querySelectorAll('.lid')];
+const pupils = [...document.querySelectorAll('.pupil')];
+function blink() {
+  lids.forEach(l => l.style.transform = 'scaleY(1)');
+  setTimeout(() => lids.forEach(l => l.style.transform = 'scaleY(0)'), 120);
+  setTimeout(blink, 2800 + Math.random() * 4200);
+}
+setTimeout(blink, 1500);
+setInterval(() => {
+  if (expression !== 'idle') return;
+  const dx = -50 + (Math.random() * 44 - 22), dy = -50 + (Math.random() * 30 - 15);
+  pupils.forEach(p => p.style.transform = `translate(${dx}%,${dy}%)`);
+  setTimeout(() => pupils.forEach(p => p.style.transform = 'translate(-50%,-50%)'), 1400);
+}, 3800);
+
+// boop!
+document.body.onclick = () => {
+  const prev = expression;
+  setX('surprised');
+  setTimeout(() => setX(prev === 'surprised' ? 'idle' : prev), 700);
+};
+
+// ---------- events from the app ----------
+const caption = document.getElementById('caption');
+let captionTimer;
+let currentAudio = null;
+function speechDone() {
+  speaking = false;
+  currentAudio = null;
+  if (expression === 'talking') { setX('happy'); setTimeout(() => setX('idle'), 1200); }
+}
+function hush() {  // cut any speech mid-sentence
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  speaking = false;
+}
+
+async function say(text) {
+  caption.textContent = text;
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => caption.textContent = '', Math.max(4000, text.length * 60));
+  if (!document.getElementById('tts').classList.contains('on')) return;
+  try {  // natural voice via Cartesia (server-side key, /api/tts proxy)
+    const r = await fetch('/api/tts', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text }) });
+    if (!r.ok) throw new Error('tts ' + r.status);
+    const url = URL.createObjectURL(await r.blob());
+    const a = new Audio(url);
+    currentAudio = a;
+    speaking = true;
+    a.onended = () => { URL.revokeObjectURL(url); speechDone(); };
+    a.onerror = () => { URL.revokeObjectURL(url); speechDone(); };
+    await a.play();
+  } catch (e) {  // fallback: browser TTS
+    if (!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05; u.pitch = 1.25;
+    speaking = true;
+    u.onend = speechDone;
+    speechSynthesis.speak(u);
+  }
+}
+const es = new EventSource('/events');
+let lastTs = 0;
+es.onmessage = (e) => {
+  const ev = JSON.parse(e.data);
+  if (ev.ts && ev.ts < Date.now() / 1000 - 10) return;  // skip replayed history
+  if (ev.type === 'expression') setX(ev.value);
+  else if (ev.type === 'say') say(ev.text);
+  else if (ev.type === 'control') {
+    if (ev.value === 'listen_on') { wantListen = true; startListening(); }
+    else if (ev.value === 'listen_off') { wantListen = false; if (rec) rec.stop(); hush(); setX('idle'); }
+  }
+};
+
+// ---------- HUD ----------
+document.getElementById('fs').onclick = (e) => {
+  e.stopPropagation();
+  document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+};
+document.getElementById('tts').onclick = (e) => { e.stopPropagation(); e.target.classList.toggle('on'); };
+
+const micBtn = document.getElementById('mic');
+const autoListen = qs.has('listen');  // ?listen=1 -> always-on ears (kiosk mode)
+let rec = null, wantListen = autoListen;
+
+function startListening() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { say("Voice input needs Chrome, sorry!"); return; }
+  if (rec) return;
+  rec = new SR();
+  rec.lang = 'en-US';
+  rec.continuous = true;
+  rec.interimResults = true;
+  micBtn.classList.add('on');
+  rec.onresult = (ev) => {
+    const res = ev.results[ev.results.length - 1];
+    caption.textContent = '“' + res[0].transcript.trim() + (res.isFinal ? '”' : '…');
+    if (res.isFinal) {
+      const text = res[0].transcript.trim();
+      if (text.length > 1 && !speaking) {  // don't transcribe our own TTS voice
+        fetch('/instruct', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ text, agent: qs.get('agent') || localStorage.agent || 'claude' }) });
+      }
+    }
+  };
+  rec.onend = () => {
+    rec = null;
+    micBtn.classList.remove('on');
+    if (wantListen) setTimeout(startListening, 400);  // auto-restart: always-on ears
+    else if (expression === 'listening') setX('idle');
+  };
+  rec.onerror = (e) => { if (e.error === 'not-allowed') { wantListen = false; say("I need microphone permission."); } };
+  rec.start();
+}
+
+micBtn.onclick = (e) => {
+  e.stopPropagation();
+  wantListen = !rec;
+  rec ? rec.stop() : startListening();
+};
+if (autoListen) startListening();
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "_note": "Cartesia TTS for the robot face. Keep this file out of any git repo.",
+  "provider": "cartesia",
+  "api_key": "sk_car_YOUR_CARTESIA_KEY_HERE",
+  "model_id": "sonic-2",
+  "voice_id": "a33f7a4c-100f-41cf-a1fd-5822e8fc253f",
+  "controls": {
+    "speed": "normal",
+    "emotion": [
+      "positivity:highest",
+      "surprise:high"
+    ]
+  },
+  "voices": {
+    "lauren_lively": "a33f7a4c-100f-41cf-a1fd-5822e8fc253f",
+    "joanie_vibrant": "a7b8d8fa-f6e5-4908-900e-0c11d1d82519",
+    "pippa_bright": "81cd8d19-45e7-47b2-ad0e-bcd94f557ad0",
+    "jasper_vibrant": "e98bd614-9b9d-4031-b930-ed72482af858",
+    "skylar_friendly": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+    "gemma_decisive": "62ae83ad-4f6a-430b-af41-a9bede9286ca"
+  }
+}
