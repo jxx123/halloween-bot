@@ -16,6 +16,7 @@ Run with the lerobot env python. The robot server must be running for cams/state
 import json
 import os
 import queue
+import subprocess
 import threading
 import time
 import urllib.request
@@ -338,7 +339,26 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     threading.Thread(target=scene_watcher, daemon=True).start()
+    # Bind localhost plus the tailnet address (if up) — never the plain LAN.
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    extra_hosts = []
+    try:
+        ts_bin = "tailscale"
+        import shutil as _sh
+        if not _sh.which(ts_bin):
+            ts_bin = str(Path.home() / ".local/bin/tailscale")
+        ts = subprocess.run([ts_bin, "ip", "-4"], capture_output=True, text=True, timeout=5)
+        if ts.returncode == 0 and ts.stdout.strip():
+            extra_hosts.append(ts.stdout.strip().splitlines()[0])
+    except Exception:
+        pass
+    for h in extra_hosts:
+        try:
+            extra = ThreadingHTTPServer((h, PORT), Handler)
+            threading.Thread(target=extra.serve_forever, daemon=True).start()
+            print(f"also serving on http://{h}:{PORT} (tailnet)", flush=True)
+        except OSError as e:
+            print(f"tailnet bind {h}:{PORT} failed: {e}", flush=True)
     print(f"robot web app on http://127.0.0.1:{PORT}  (face: /face)", flush=True)
     httpd.serve_forever()
 

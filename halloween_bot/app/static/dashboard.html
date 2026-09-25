@@ -63,12 +63,12 @@
 <main>
   <div class="cams">
     <div class="cam"><div class="label">overhead</div>
-      <img src="http://127.0.0.1:8399/stream?name=overhead" onerror="this.alt='robot server offline'"></div>
+      <img data-stream="overhead" onerror="this.alt='robot server offline'"></div>
     <div style="display:flex; gap:12px; flex:1; min-height:0">
       <div class="cam"><div class="label">left wrist — orange arm</div>
-        <img src="http://127.0.0.1:8399/stream?name=left_wrist" onerror="this.alt='robot server offline'"></div>
+        <img data-stream="left_wrist" onerror="this.alt='robot server offline'"></div>
       <div class="cam"><div class="label">right wrist — blue arm</div>
-        <img src="http://127.0.0.1:8399/stream?name=right_wrist" onerror="this.alt='robot server offline'"></div>
+        <img data-stream="right_wrist" onerror="this.alt='robot server offline'"></div>
     </div>
   </div>
   <div class="right">
@@ -83,6 +83,10 @@
   </div>
 </main>
 <script>
+// camera streams come from the robot server on the same host as this page
+document.querySelectorAll('img[data-stream]').forEach(i =>
+  i.src = `http://${location.hostname}:8399/stream?name=${i.dataset.stream}`);
+
 const feed = document.getElementById('feed');
 const agentSel = document.getElementById('agent');
 
