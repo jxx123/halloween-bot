@@ -9,6 +9,12 @@ Endpoints:
   POST /instruct          {"text": ..., "agent": "claude"|"codex"|"echo"}
   GET  /api/state         proxied robot joint state (robot server :8399)
   GET  /api/agents        available agent backends
+  GET|POST /api/policy    π₀-FAST policy status / start {task, seconds, lockstep}
+  POST /api/policy/stop   stop the policy run
+  POST /api/sim/reset     MuJoCo twin only: arms to rest pose, toys re-placed
+
+Robot server address: HALLOWEEN_ROBOT_API (default http://127.0.0.1:8399) — the real robot
+or the MuJoCo twin (python -m halloween_bot.ctl start --sim), same API.
 
 Camera streams come straight from the robot server (:8399/stream?name=...) as MJPEG.
 Run with the lerobot env python. The robot server must be running for cams/state.
@@ -19,6 +25,7 @@ import queue
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,7 +40,7 @@ except ImportError:
     from agents import abort_current, agent_names, get_agent  # script mode
 
 PORT = 8500
-ROBOT_API = "http://127.0.0.1:8399"
+ROBOT_API = os.environ.get("HALLOWEEN_ROBOT_API", "http://127.0.0.1:8399")
 STATIC = Path(__file__).resolve().parent / "static"
 LATEST = Path.home() / "lerobot/outputs/claude_robot/latest"
 
@@ -82,6 +89,21 @@ def cartesia_tts(text: str) -> bytes:
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.read()
+
+
+def robot_call(path: str, payload: dict | None = None, timeout: float = 30) -> tuple[int, dict]:
+    """Proxy one JSON call to the robot server; returns (http_code, body)."""
+    req = urllib.request.Request(f"{ROBOT_API}{path}")
+    if payload is not None:
+        req.data = json.dumps(payload).encode()
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        return 502, {"ok": False, "error": f"robot server unreachable: {e}"}
 
 
 def save_watch():
@@ -244,6 +266,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": str(e)}, 502)
         elif url.path == "/api/agents":
             self._json({"agents": agent_names()})
+        elif url.path == "/api/policy":
+            code, body = robot_call("/policy", timeout=5)
+            self._json(body, code)
         elif url.path == "/api/watch":
             self._json({"ok": True, **watch})
         elif url.path == "/api/host":
@@ -317,6 +342,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(res)
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 502)
+        elif url.path in ("/api/policy", "/api/policy/stop", "/api/sim/reset"):
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                payload = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                self._json({"error": "bad json"}, 400)
+                return
+            code, body = robot_call(url.path.removeprefix("/api"), payload)
+            if body.get("ok"):
+                if url.path == "/api/policy":
+                    broadcast({"type": "action", "text": f"π policy: {body.get('task')} ({body.get('seconds')} s)"})
+                elif url.path == "/api/policy/stop":
+                    broadcast({"type": "status", "text": "π policy stopped"})
+                else:
+                    broadcast({"type": "status", "text": "sim reset: arms at rest, toys re-placed"})
+            self._json(body, code)
         elif url.path == "/api/watch":
             n = int(self.headers.get("Content-Length") or 0)
             try:
