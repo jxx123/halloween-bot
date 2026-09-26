@@ -92,6 +92,9 @@ class PolicyRunner:
         self._stub_factory = stub_factory or _default_stub_factory
         self._instructed = False
         self._lock = threading.Lock()
+        self._start_lock = threading.Lock()  # claim a run atomically (double clicks, agent + dashboard)
+        self._channel = None
+        self._fatal: str | None = None  # set by the receiver thread when the run can't continue
         self._stop = threading.Event()
         self._chunk_arrived = threading.Event()
         self._thread: threading.Thread | None = None
@@ -111,21 +114,30 @@ class PolicyRunner:
             return {**self._status, "queue": len(self._queue)}
 
     def start(self, task: str = DEFAULT_TASK, seconds: float = 30.0, lockstep: bool = False) -> dict:
-        if self.running:
-            raise PolicyBusy("a policy run is already in progress (POST /policy/stop first)")
         if lockstep and (self.pause is None or self.resume is None):
             raise ValueError("lockstep needs pause/resume hooks (sim only)")
         seconds = max(0.1, min(300.0, float(seconds)))
+        with self._start_lock:
+            if self.running:
+                raise PolicyBusy("a policy run is already in progress (POST /policy/stop first)")
+            previous = self.status()
+            self._stop.clear()
+            self._fatal = None
+            self._reset_queue()
+            self._set(running=True, phase="connecting", task=task, lockstep=lockstep, seconds=seconds,
+                      elapsed_s=0.0, executed=0, chunks=0, last_latency_s=None, error=None)
         channel, stub = self._stub_factory(self.server_address)
         try:
             stub.Ready(services_pb2.Empty(), timeout=self.connect_timeout)
         except grpc.RpcError as e:
             channel.close()
+            self._set(**{k: previous[k] for k in self._status})
             raise PolicyUnavailable(f"policy server unreachable at {self.server_address} ({_rpc_code(e)})") from e
-        self._stop.clear()
-        self._reset_queue()
-        self._set(running=True, phase="connecting", task=task, lockstep=lockstep, seconds=seconds,
-                  elapsed_s=0.0, executed=0, chunks=0, last_latency_s=None, error=None)
+        self._channel = channel
+        if self._stop.is_set():  # stop() landed while we were connecting
+            channel.close()
+            self._set(running=False, phase="stopped")
+            return self.status()
         self._thread = threading.Thread(target=self._run, args=(channel, stub, task, seconds, lockstep),
                                         name="policy-runner", daemon=True)
         self._thread.start()
@@ -134,6 +146,8 @@ class PolicyRunner:
     def stop(self, timeout: float = 5.0) -> dict:
         self._stop.set()
         self._chunk_arrived.set()  # wake a lockstep wait
+        if self._channel is not None:
+            self._channel.close()  # cancels in-flight RPCs: a 47 s model load, a blocked GetActions
         t = self._thread
         if t is not None and t.is_alive() and t is not threading.current_thread():
             t.join(timeout)
@@ -170,9 +184,15 @@ class PolicyRunner:
             receiver = threading.Thread(target=self._receive_loop, args=(stub,), name="policy-rx", daemon=True)
             receiver.start()
             self._control_loop(stub, task, seconds, lockstep)
-            self._set(phase="stopped" if self._stop.is_set() else "done")
+            if self._fatal:
+                self._set(phase="error", error=self._fatal)
+            else:
+                self._set(phase="stopped" if self._stop.is_set() else "done")
         except Exception as e:  # surfaced via status(); the robot just holds its last pose
-            self._set(phase="error", error=f"{type(e).__name__}: {e}")
+            if self._stop.is_set() and not self._fatal:  # stop() cancelled an in-flight RPC
+                self._set(phase="stopped")
+            else:
+                self._set(phase="error", error=self._fatal or f"{type(e).__name__}: {e}")
         finally:
             self._stop.set()
             if self._paused_by_us:
@@ -184,6 +204,13 @@ class PolicyRunner:
             self._set(running=False)
 
     def _receive_loop(self, stub):
+        try:
+            self._receive(stub)
+        except Exception as e:  # e.g. an unpicklable reply: end the run instead of hanging it
+            self._fatal = f"action receiver failed: {type(e).__name__}: {e}"
+            self._stop.set()
+
+    def _receive(self, stub):
         errors = 0
         while not self._stop.is_set():
             try:
@@ -195,6 +222,7 @@ class PolicyRunner:
                 errors += 1
                 self._set(error=f"GetActions failed: {_rpc_code(e)}")
                 if errors >= 10:
+                    self._fatal = f"GetActions failed 10 times in a row ({_rpc_code(e)})"
                     self._stop.set()
                     return
                 time.sleep(0.2)
@@ -236,7 +264,8 @@ class PolicyRunner:
             timestep = max(self._latest, 0)
             self._last_obs_t = now
         obs = TimedObservation(timestamp=now, observation=raw, timestep=timestep, must_go=must_go)
-        stub.SendObservations(send_bytes_in_chunks(pickle.dumps(obs), services_pb2.Observation, silent=True))
+        stub.SendObservations(send_bytes_in_chunks(pickle.dumps(obs), services_pb2.Observation, silent=True),
+                              timeout=10)
 
     def _reinstruct(self, stub, task: str):
         self._set(phase="reloading")
@@ -299,8 +328,10 @@ class PolicyRunner:
             else:
                 if qsize == 0 and waiting_since is None:
                     waiting_since = time.time()
-                if (qsize == 0 and not reinstructed and waiting_since is not None
+                if (qsize == 0 and waiting_since is not None
                         and time.time() - waiting_since > self.first_chunk_timeout):
+                    if reinstructed:
+                        raise TimeoutError(f"no action chunk from the policy server in {self.first_chunk_timeout}s")
                     self._reinstruct(stub, task)
                     reinstructed = True
                     waiting_since = time.time()

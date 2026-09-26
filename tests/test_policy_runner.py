@@ -23,8 +23,11 @@ class Unavailable(grpc.RpcError):
 class FakeStub:
     """Answers each must_go observation with a chunk of `chunk` actions valued at their timestep."""
 
-    def __init__(self, reachable=True, chunk=10, delay=0.05):
+    def __init__(self, reachable=True, chunk=10, delay=0.05, instruct_fixes=True, ready_delay=0.0,
+                 garbage=False):
         self.reachable, self.chunk, self.delay = reachable, chunk, delay
+        self.instruct_fixes, self.ready_delay, self.garbage = instruct_fixes, ready_delay, garbage
+        self.channel = None
         self.instructions = 0
         self.obs = []
         self.pending = []
@@ -32,13 +35,19 @@ class FakeStub:
         self.serve = True
 
     def Ready(self, req, timeout=None):
+        time.sleep(self.ready_delay)
         if not self.reachable:
             raise Unavailable()
         return services_pb2.Empty()
 
     def SendPolicyInstructions(self, req, timeout=None):
         self.instructions += 1
-        self.serve = True
+        if self.channel is not None and self.channel.block_instructions:  # a slow model load
+            if not self.channel.closed.wait(10):
+                raise AssertionError("instructions never cancelled")
+            raise Cancelled()
+        if self.instruct_fixes:
+            self.serve = True
         return services_pb2.Empty()
 
     def SendObservations(self, it, timeout=None):
@@ -58,21 +67,37 @@ class FakeStub:
                 return services_pb2.Actions(data=b"")
             obs = self.pending.pop(0)
         time.sleep(self.delay)
+        if self.garbage:
+            return services_pb2.Actions(data=b"not a pickle")
         t0 = obs.get_timestep()
         acts = [TimedAction(timestamp=time.time(), timestep=t0 + i, action=torch.full((12,), float(t0 + i)))
                 for i in range(self.chunk)]
         return services_pb2.Actions(data=pickle.dumps(acts))
 
 
+class Cancelled(grpc.RpcError):
+    def code(self):
+        return grpc.StatusCode.CANCELLED
+
+
 class FakeChannel:
+    def __init__(self, block_instructions=False):
+        self.block_instructions = block_instructions
+        self.closed = threading.Event()
+
     def close(self):
-        pass
+        self.closed.set()
 
 
-def make(stub, **kw):
+def make(stub, block_instructions=False, **kw):
     sent = []
+
+    def factory(addr):
+        stub.channel = FakeChannel(block_instructions)
+        return stub.channel, stub
+
     r = PolicyRunner(lambda: {**{k: 0.0 for k in KEYS}, "base_0_rgb": np.zeros((8, 8, 3), np.uint8)},
-                     sent.append, KEYS, FEATURES, fps=100, stub_factory=lambda addr: (FakeChannel(), stub), **kw)
+                     sent.append, KEYS, FEATURES, fps=100, stub_factory=factory, **kw)
     return r, sent
 
 
@@ -176,3 +201,48 @@ def test_fit_image_crops_16_9_to_4_3_then_resizes():
     out = fit_image(img)
     assert out.shape == (480, 640, 3) and out.min() == 255
     assert fit_image(np.zeros((480, 640, 3), np.uint8)).shape == (480, 640, 3)
+
+
+def test_realtime_run_errors_out_when_no_chunk_ever_arrives():
+    stub = FakeStub(instruct_fixes=False)
+    stub.serve = False
+    r, _ = make(stub, first_chunk_timeout=0.3)
+    r.start("t", seconds=0.5)
+    wait_done(r, 5)
+    st = r.status()
+    assert st["phase"] == "error" and "no action chunk" in st["error"]
+
+
+def test_receiver_crash_ends_the_run_with_an_error():
+    r, _ = make(FakeStub(garbage=True))
+    r.start("t", seconds=5)
+    wait_done(r, 5)
+    assert r.status()["phase"] == "error"
+
+
+def test_concurrent_starts_run_exactly_once():
+    r, _ = make(FakeStub(ready_delay=0.2))
+    outcomes = []
+
+    def go():
+        try:
+            r.start("t", seconds=0.3)
+            outcomes.append("started")
+        except PolicyBusy:
+            outcomes.append("busy")
+
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert sorted(outcomes) == ["busy", "started"]
+    wait_done(r)
+
+
+def test_stop_cancels_a_blocking_model_load():
+    r, _ = make(FakeStub(), block_instructions=True)
+    r.start("t", seconds=30)
+    time.sleep(0.2)
+    assert r.status()["phase"] == "loading"
+    t = time.time()
+    st = r.stop()
+    assert time.time() - t < 2 and not st["running"]
