@@ -19,7 +19,7 @@ Decisions Jinyu made (2026-09-25):
 - **Sys-ID:** start from the Menagerie SO101 model plus the real calibration. Fit it to the
   existing 1080 teleop recording, then refine with a short real step-response run
   that the 1080 session executes after Jinyu approves.
-- **Pi backend:** the existing lerobot gRPC `policy_server` in `~/pi-serve`. The sim acts as the robot client.
+- **Pi backend:** the existing lerobot gRPC `policy_server` in `~/pi-serve`. The sim acts as the robot client. The sim gets its own instance on :8081, because :8080 serves the 1080's real-robot client and a policy server handles one client at a time.
 - **Real robot:** the policy runner is a shared module. The 1080 session wires it into
   `server.py` and tests it on hardware. This session does not edit `server.py`.
 - **Timing:** real-time by default (the sim keeps moving during inference, like the real
@@ -114,7 +114,7 @@ New endpoints:
 - `POST /sim/reset {"randomize": bool}` puts the arms back at the rest pose (pick_toys
   `PARK`: pan −5, lift −86, elbow 95, wrist_flex 45, wrist_roll −10, gripper 40, both
   arms) and re-places the toys.
-- `POST /sim/trajectory {"points": [{targets}], "hz": 30}` plays a commanded sequence and
+- `POST /trajectory {"points": [{targets}], "hz": 30}` plays a commanded sequence and
   returns a per-tick trace `[{t, cmd, present}]`. The real server gets the same
   endpoint (1080 side) for sys-ID A/B.
 - `/policy` endpoints come from PolicyRunner (§4).
