@@ -23,6 +23,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -60,6 +61,81 @@ except (FileNotFoundError, json.JSONDecodeError):
     pass
 _last_react = 0.0
 host = {"on": False}  # master "robot host mode": face ears + motion reactions
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+js_proc = None  # PS4 teleop child, owned by the webapp
+
+
+def joystick_alive() -> bool:
+    if js_proc is not None and js_proc.poll() is None:
+        return True
+    r = subprocess.run(["pgrep", "-f", "ps4_teleo[p]"], capture_output=True)
+    return r.returncode == 0
+
+
+def stop_joystick():
+    global js_proc
+    if js_proc is not None and js_proc.poll() is None:
+        js_proc.terminate()
+        try:
+            js_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            js_proc.kill()
+    js_proc = None
+    subprocess.run(["pkill", "-f", "ps4_teleo[p]"], capture_output=True)
+
+
+def start_joystick() -> tuple[bool, str]:
+    global js_proc
+    if joystick_alive():
+        return True, "joystick teleop already running"
+    log = open(Path.home() / "lerobot/outputs/claude_robot/ps4_webapp.log", "ab")
+    js_proc = subprocess.Popen([sys.executable, "-m", "halloween_bot.ps4_teleop"],
+                               cwd=REPO_ROOT, stdout=log, stderr=log)
+    time.sleep(2)
+    if js_proc.poll() is not None:
+        return False, "joystick driver exited at start (controller plugged in?)"
+    return True, "joystick teleop started"
+
+
+def robot_teleop(enable: bool) -> dict:
+    req = urllib.request.Request(f"{ROBOT_API}/teleop", data=json.dumps({"enabled": enable}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+
+def teleop_mode() -> str:
+    try:
+        with urllib.request.urlopen(f"{ROBOT_API}/teleop", timeout=4) as r:
+            if json.loads(r.read()).get("enabled"):
+                return "leaders"
+    except Exception:
+        pass
+    return "joystick" if joystick_alive() else "off"
+
+
+def set_teleop_mode(mode: str) -> dict:
+    if mode not in ("off", "leaders", "joystick"):
+        return {"ok": False, "error": f"unknown mode {mode!r}"}
+    if mode == "off":
+        stop_joystick()
+        try:
+            robot_teleop(False)
+        except Exception:
+            pass
+        return {"ok": True, "mode": "off", "msg": "teleop off — arms hold"}
+    if mode == "leaders":
+        stop_joystick()
+        out = robot_teleop(True)
+        return {"ok": out.get("ok", False), "mode": teleop_mode(), "msg": out.get("msg", "")}
+    # joystick
+    try:
+        robot_teleop(False)
+    except Exception:
+        pass
+    ok, msg = start_joystick()
+    return {"ok": ok, "mode": teleop_mode(), "msg": msg}
 
 TTS_FILE = Path(__file__).resolve().parent / "tts_config.json"
 try:
@@ -273,6 +349,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, **watch})
         elif url.path == "/api/host":
             self._json({"ok": True, "on": host["on"]})
+        elif url.path == "/api/teleop_mode":
+            self._json({"ok": True, "mode": teleop_mode()})
         else:
             self._json({"error": "unknown endpoint"}, 404)
 
@@ -330,6 +408,16 @@ class Handler(BaseHTTPRequestHandler):
                 broadcast({"type": "expression", "value": "idle"})
                 broadcast({"type": "status", "text": "host mode OFF: ears + motion reactions stopped"})
             self._json({"ok": True, "on": host["on"]})
+        elif url.path == "/api/teleop_mode":
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                payload = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                self._json({"error": "bad json"}, 400)
+                return
+            res = set_teleop_mode(str(payload.get("mode", "off")))
+            broadcast({"type": "status", "text": f"teleop mode: {res.get('mode')} — {res.get('msg', '')}"})
+            self._json(res)
         elif url.path == "/api/teleop":
             n = int(self.headers.get("Content-Length") or 0)
             try:

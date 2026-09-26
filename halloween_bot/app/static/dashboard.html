@@ -66,7 +66,11 @@
   <span id="simbadge" hidden title="MuJoCo twin — same API as the real robot">SIM</span>
   <div class="spacer"></div>
   <button id="host" title="start robot host mode: face ears on + motion reactions">▶ start</button>
-  <button id="teleop" title="mirror the leader arms onto the followers">🕹 teleop: …</button>
+  <label>🕹 teleop <select id="teleopmode">
+    <option value="off">off</option>
+    <option value="leaders">leader arms</option>
+    <option value="joystick">PS4 joystick</option>
+  </select></label>
   <label>agent <select id="agent"></select></label>
   <a class="facelink" href="/face" target="_blank">🙂 robot face</a>
   <a class="facelink" href="/face?theme=halloween" target="_blank">🎃</a>
@@ -181,70 +185,28 @@ setInterval(async () => {
   } catch {}
 }, 3000);
 
-const teleopBtn = document.getElementById('teleop');
-let teleopOn = false;
-function renderTeleop() {
-  teleopBtn.textContent = teleopOn ? '🕹 teleop: ON' : '🕹 teleop: off';
-  teleopBtn.style.borderColor = teleopOn ? 'var(--ok)' : 'var(--edge)';
-  teleopBtn.style.color = teleopOn ? 'var(--ok)' : 'var(--txt)';
-}
-renderTeleop();
-teleopBtn.onclick = async () => {
-  if (!teleopOn && !confirm('Teleop ON: the follower arms will immediately move to match ' +
-      'the leader arms. Hold the leaders in a safe pose. Continue?')) return;
-  teleopBtn.disabled = true;
-  try {
-    const r = await (await fetch('/api/teleop', { method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: !teleopOn }) })).json();
-    if (r.ok) { teleopOn = r.enabled; renderTeleop(); }
-    else add('status err', r.error || 'teleop toggle failed');
-  } finally { teleopBtn.disabled = false; }
-};
-
-const pstatus = document.getElementById('pstatus');
-let simMode = null;
-function renderSim(sim) {
-  if (sim === simMode) return;
-  simMode = sim;
-  document.getElementById('simbadge').hidden = !sim;
-  document.getElementById('scenecam').hidden = !sim;
-  document.getElementById('plockwrap').hidden = !sim;
-  document.getElementById('sreset').hidden = !sim;
-  document.getElementById('sshuffle').hidden = !sim;
-  teleopBtn.hidden = sim;
-  const scene = document.getElementById('sceneimg');
-  scene.src = sim ? `http://${location.hostname}:8399/stream?name=scene` : '';
-}
-function renderPolicy(p) {
-  const run = document.getElementById('prun');
-  if (!p) {
-    pstatus.textContent = 'policy: not wired on this robot server yet';
-    pstatus.className = ''; run.disabled = true; return;
+const teleopSel = document.getElementById('teleopmode');
+let teleopBusy = false;
+teleopSel.onchange = async () => {
+  if (teleopSel.value === 'leaders' && !confirm('Leader teleop: the follower arms will immediately ' +
+      'move to match the leader arms. Hold the leaders in a safe pose. Continue?')) {
+    teleopSel.value = 'off'; return;
   }
-  run.disabled = p.running;
-  let t = `policy: ${p.phase}`;
-  if (p.task && p.phase !== 'idle') t += ` · "${p.task}" · ${p.elapsed_s}/${p.seconds}s · ${p.executed} actions · ${p.chunks} chunks`;
-  if (p.last_latency_s) t += ` · inference ${p.last_latency_s}s`;
-  if (p.lockstep && p.running) t += ' · lockstep';
-  if (p.error) t += ` · ${p.error}`;
-  if (p.phase === 'loading') t += ' (loading the model on the GPU, ~50 s the first time)';
-  pstatus.textContent = t;
-  pstatus.className = p.phase === 'error' ? 'err' : (p.running ? 'run' : '');
-}
-async function policyPost(path, body) {
-  const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'},
-                                body: JSON.stringify(body || {}) });
-  const d = await r.json();
-  if (!r.ok || d.ok === false) add('status err', d.error || `${path} failed`);
-  pollState();
-}
-document.getElementById('prun').onclick = () => policyPost('/api/policy', {
-  task: document.getElementById('ptask').value.trim(),
-  seconds: Number(document.getElementById('psecs').value) || 30,
-  lockstep: document.getElementById('plock').checked });
-document.getElementById('pstop').onclick = () => policyPost('/api/policy/stop');
-document.getElementById('sreset').onclick = () => policyPost('/api/sim/reset', { randomize: false });
-document.getElementById('sshuffle').onclick = () => policyPost('/api/sim/reset', { randomize: true });
+  teleopBusy = true;
+  try {
+    const r = await (await fetch('/api/teleop_mode', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: teleopSel.value }) })).json();
+    if (r.ok) teleopSel.value = r.mode;
+    else add('status err', r.error || r.msg || 'teleop mode failed');
+  } finally { teleopBusy = false; }
+};
+setInterval(async () => {
+  if (teleopBusy) return;
+  try {
+    const r = await (await fetch('/api/teleop_mode')).json();
+    if (r.ok && document.activeElement !== teleopSel) teleopSel.value = r.mode;
+  } catch {}
+}, 3000);
 
 async function pollState() {
   try {
@@ -255,7 +217,6 @@ async function pollState() {
       const j = document.getElementById('joints');
       j.innerHTML = Object.entries(d.positions)
         .map(([k,v]) => `<span>${k.replace('.pos','').replace(/_/g,' ')}<br><b>${v.toFixed(1)}</b></span>`).join('');
-      if (typeof d.teleop === 'boolean' && d.teleop !== teleopOn) { teleopOn = d.teleop; renderTeleop(); }
     } else throw 0;
   } catch { document.getElementById('joints').textContent = 'robot state: server offline (python ctl.py start)'; }
 }
