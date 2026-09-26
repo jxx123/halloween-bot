@@ -160,8 +160,9 @@ def apply_geometry(model: mujoco.MjModel, geometry: dict) -> None:
     the upper arm and forearm grow along their links, the claws slide out along the wrist-roll axis
     (gripper -z), the bases rise off the table, and the overhead camera takes the fitted real pose.
     """
-    g = (geometry or {}).get("lengths_m", {})
+    lengths = (geometry or {}).get("lengths_m", {})
     for side in SIDES:
+        g = lengths.get(side, {}) if set(lengths) & set(SIDES) else lengths  # per arm, or both arms
         _stretch(model.body(f"{side}_lower_arm"), g.get("upper_arm_dx", 0.0))
         _stretch(model.body(f"{side}_wrist"), g.get("forearm_dx", 0.0))
         grip = model.body(f"{side}_gripper")

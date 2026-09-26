@@ -28,6 +28,11 @@ TICKS_PER_RAD = 4095 / (2 * math.pi)
 GRIPPER_RANGE = (-0.174533, 1.7453292)  # Menagerie jaw joint range: closed, open
 
 
+def _radians(offsets_deg: dict) -> dict:
+    """{motor: deg} or {side: {motor: deg}} -> same shape in radians."""
+    return {k: (_radians(v) if isinstance(v, dict) else math.radians(v)) for k, v in offsets_deg.items()}
+
+
 def split_key(key: str) -> tuple[str, str]:
     side, motor = key.removesuffix(".pos").split("_", 1)
     return side, motor
@@ -50,7 +55,10 @@ class Calibration:
                 if calib[side][motor].get("drive_mode", 0):
                     raise ValueError(f"{side}/{motor}: drive_mode=1 calibrations are not supported")
         self.calib = calib
-        self.offsets = dict(offsets or {})  # motor -> rad, applied to both arms
+        # motor -> rad for both arms, or {"left": {motor: rad}, "right": {...}} per arm
+        offsets = dict(offsets or {})
+        self.offsets = ({s: dict(offsets.get(s, {})) for s in SIDES} if set(offsets) & set(SIDES)
+                        else {s: dict(offsets) for s in SIDES})
         self.zero = dict(zero or {})  # motor -> "mid" | "homing"
         for motor, conv in self.zero.items():
             if motor == "gripper" or motor not in MOTORS or conv not in ("mid", "homing"):
@@ -67,14 +75,14 @@ class Calibration:
                 shift = 0.0
                 if self.zero.get(motor) == "homing":
                     shift = ((c["range_min"] + c["range_max"]) / 2 - 2047) / TICKS_PER_RAD
-                self._affine[key] = (half_span_rad / 100.0, shift + self.offsets.get(motor, 0.0))
+                self._affine[key] = (half_span_rad / 100.0, shift + self.offsets[side].get(motor, 0.0))
 
     @classmethod
     def load(cls, directory: Path = CALIB_DIR, geometry: Path | None = GEOMETRY_FILE) -> "Calibration":
         offsets, zero = {}, {}
         if geometry is not None and geometry.exists():
             g = json.loads(geometry.read_text())
-            offsets = {m: math.radians(v) for m, v in g.get("joint_offsets_deg", {}).items()}
+            offsets = _radians(g.get("joint_offsets_deg", {}))
             zero = g.get("zero", {})
         return cls({s: json.loads((directory / f"bimanual_{s}.json").read_text()) for s in SIDES},
                    offsets=offsets, zero=zero)

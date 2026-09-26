@@ -121,3 +121,48 @@ def test_apply_geometry_base_pitch_tilts_the_arm_forward():
     x0 = np.zeros(3)
     mujoco.mju_rotVecQuat(x0, np.array([1.0, 0, 0]), m0.body("right_base").quat)
     assert x0[2] == pytest.approx(0, abs=1e-9) and x[2] == pytest.approx(-math.sin(math.radians(10)), abs=1e-6)
+
+
+def test_per_side_lengths_and_offsets():
+    m0 = build_model(params={}, props=False, geometry={})
+    m1 = build_model(params={}, props=False, geometry={})
+    apply_geometry(m1, {"lengths_m": {"right": {"forearm_dx": 0.01}, "left": {}}})
+    grow = lambda side: np.linalg.norm(m1.body(f"{side}_wrist").pos) - np.linalg.norm(m0.body(f"{side}_wrist").pos)
+    assert grow("right") == pytest.approx(0.01) and grow("left") == pytest.approx(0.0)
+    base = Calibration.load(geometry=None)
+    cal = Calibration(base.calib, offsets={"right": {"elbow_flex": 0.1}})
+    assert cal.to_rad("right_elbow_flex.pos", 5) == pytest.approx(base.to_rad("right_elbow_flex.pos", 5) + 0.1)
+    assert cal.to_rad("left_elbow_flex.pos", 5) == pytest.approx(base.to_rad("left_elbow_flex.pos", 5))
+
+
+def _fake_measurements(truth: dict) -> dict:
+    """Card-format measurements produced by a 'true' geometry (so the fit has a known answer)."""
+    from halloween_bot.sim.kincal import POINTS, Kin, STOCK_MM
+    kin = Kin(geometry=truth)
+    kin.set(truth)
+    meas = {}
+    for key, stock in (("A1_lift_to_elbow", "upper_arm"), ("A2_elbow_to_wrist", "forearm"), ("A3_wrist_to_claw_tip", "claw")):
+        meas[key] = {s: STOCK_MM[stock] + 1000 * truth["lengths_m"][s].get(f"{stock}_dx", 0.0) for s in ("left", "right")}
+    meas["A4_table_to_lift_axis"] = {s: STOCK_MM["lift_axis_height"] for s in ("left", "right")}
+    for name, elbow in (("P0", 0.0), ("P1", 20.0)):
+        state = {f"{s}_{m}.pos": v for s in ("left", "right") for m, v in
+                 (("shoulder_pan", 0), ("shoulder_lift", 0), ("elbow_flex", elbow), ("wrist_flex", 0), ("wrist_roll", 0), ("gripper", 5))}
+        meas[name] = {"state": state}
+        for label, point in POINTS.items():
+            meas[name][label] = {s: 1000 * kin.point_height(state, s, point) for s in ("left", "right")}
+    return meas
+
+
+def test_fit_measured_recovers_offsets(tmp_path):
+    from halloween_bot.sim.kincal import fit_measured, load_measurements
+    truth = {"lengths_m": {"right": {"forearm_dx": 0.005}, "left": {"upper_arm_dx": -0.004}},
+             "joint_offsets_deg": {"right": {"shoulder_lift": 10.0, "elbow_flex": -5.0, "wrist_flex": 3.0},
+                                   "left": {"shoulder_lift": 6.0, "elbow_flex": 2.0, "wrist_flex": -4.0}}}
+    f = tmp_path / "measurements.json"
+    f.write_text(json.dumps(_fake_measurements(truth)))
+    fixed, poses = load_measurements(f)
+    assert fixed["lengths_m"]["right"]["forearm_dx"] == pytest.approx(0.005, abs=1e-6)
+    geom = fit_measured(fixed, poses)
+    for side in ("left", "right"):
+        for motor, deg in truth["joint_offsets_deg"][side].items():
+            assert geom["joint_offsets_deg"][side][motor] == pytest.approx(deg, abs=1.0), (side, motor)

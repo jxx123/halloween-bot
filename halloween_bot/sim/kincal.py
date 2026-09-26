@@ -34,7 +34,7 @@ import mujoco
 import numpy as np
 from scipy.optimize import least_squares, minimize
 
-from .calib import GEOMETRY_FILE, KEYS, Calibration, split_key
+from .calib import GEOMETRY_FILE, KEYS, SIDES, Calibration, _radians, split_key
 from .engine import REST
 from .model import apply_geometry, build_model
 
@@ -53,6 +53,10 @@ CLAW_BODIES = ("gripper", "moving_jaw_so101_v1")  # not the camera mount: the re
 SIL_HW = (180, 320)  # silhouette resolution (h, w)
 IOU_SIGMA = 0.1  # 0.01 IoU ~ a 3.5 mm contact error: photos steer the shape, contacts own the heights
 CAM_PRIOR = np.array([0.05, 0.05, 0.05, math.radians(10), math.radians(10), math.radians(10)])
+# measurement card (docs/sim/measurement_card.md): stock values of the Menagerie model, mm
+STOCK_MM = {"upper_arm": 116.0, "forearm": 135.0, "claw": 159.7, "lift_axis_height": 116.6}
+POINTS = {"B1_elbow_axis_height": "elbow_flex", "B2_wrist_axis_height": "wrist_flex", "B3_claw_tip_height": "tip"}
+POINT_SIGMA = 0.003  # m: ruler reading of an axis-centre height
 
 
 @dataclass
@@ -105,13 +109,22 @@ class Kin:
         for name, quat in self._pristine_quat.items():
             self.model.body(name).quat[:] = quat
         apply_geometry(self.model, geometry)
-        self.offsets = {k: math.radians(v) for k, v in geometry.get("joint_offsets_deg", {}).items()}
+        off = _radians(geometry.get("joint_offsets_deg", {}))
+        self.offsets = ({s: off.get(s, {}) for s in SIDES} if set(off) & set(SIDES) else {s: off for s in SIDES})
 
     def pose(self, pos: dict, full: bool = False):
         joints = {**REST, **pos}
         for k in KEYS:
-            self.data.qpos[self._qadr[k]] = self.cal.to_rad(k, joints[k]) + self.offsets.get(split_key(k)[1], 0.0)
+            side, motor = split_key(k)
+            self.data.qpos[self._qadr[k]] = self.cal.to_rad(k, joints[k]) + self.offsets[side].get(motor, 0.0)
         (mujoco.mj_forward if full else mujoco.mj_kinematics)(self.model, self.data)  # full: cameras too
+
+    def point_height(self, pos: dict, side: str, point: str) -> float:
+        """Height above the tabletop (z=0) of a joint axis centre, or of the claw tip ("tip")."""
+        self.pose(pos)
+        if point == "tip":
+            return float(self.data.site(f"{side}_gripperframe").xpos[2])
+        return float(self.data.xanchor[self.model.joint(f"{side}_{point}").id][2])
 
     def clearance(self, pos: dict) -> float:
         self.pose(pos)
@@ -296,6 +309,66 @@ def fit_joint(rows: list[Row], anchors: list[dict], photos: list[tuple[str, dict
     return geom
 
 
+def load_measurements(path) -> tuple[dict, list[tuple[dict, str, str, float]]]:
+    """measurements.json (card format, mm) -> (fixed per-arm lengths, [(state, side, point, height_m)])."""
+    meas = json.loads(Path(os.path.expanduser(str(path))).read_text())
+    num = lambda v: isinstance(v, (int, float))
+    lengths = {s: {} for s in SIDES}
+    for key, name, dx in (("A1_lift_to_elbow", "upper_arm", "upper_arm_dx"), ("A2_elbow_to_wrist", "forearm", "forearm_dx"),
+                          ("A3_wrist_to_claw_tip", "claw", "claw_dx"), ("A4_table_to_lift_axis", "lift_axis_height", "base_dz")):
+        for s in SIDES:
+            v = meas.get(key, {}).get(s)
+            if num(v):
+                lengths[s][dx] = (v - STOCK_MM[name]) / 1000.0
+    poses = []
+    for pose_name in ("P0", "P1", "P2"):
+        p = meas.get(pose_name)
+        if not isinstance(p, dict) or not isinstance(p.get("state"), dict):
+            continue
+        state = {k: v for k, v in p["state"].items() if num(v)}
+        for label, point in POINTS.items():
+            for s in SIDES:
+                v = p.get(label, {}).get(s)
+                if num(v):
+                    poses.append((state, s, point, v / 1000.0))
+    return {"lengths_m": lengths}, poses
+
+
+def fit_measured(fixed: dict, poses: list, rows: list[Row] | None = None, prior_deg: float = 45.0) -> dict:
+    """Per-arm lift/elbow/wrist-flex offsets (on the range-middle zero) from measured point heights,
+    with the measured link lengths held fixed. Right-arm table contacts, if given, join as a check-weighted term."""
+    kin = Kin(geometry=fixed)
+    motors = OFFSETS
+    idx = [(s, mtr) for s in SIDES for mtr in motors]
+
+    def geom_of(x):
+        return {**fixed, "joint_offsets_deg": {s: {mtr: math.degrees(x[i]) for i, (ss, mtr) in enumerate(idx) if ss == s}
+                                               for s in SIDES}}
+
+    def res(x):
+        kin.set(geom_of(x))
+        r = [(kin.point_height(st, s, pt) - h) / POINT_SIGMA for st, s, pt, h in poses]
+        for row in rows or []:
+            if row.present is not None:
+                r.append(0.5 * (kin.clearance(row.present) + PRESS) / CONTACT_SIGMA)
+        r.extend(np.asarray(x) / math.radians(prior_deg))
+        return np.asarray(r)
+
+    sol = least_squares(res, np.zeros(len(idx)), diff_step=1e-4)
+    geom = geom_of(sol.x)
+    kin.set(geom)
+    homing = Calibration.load(geometry=None).calib
+    geom["fit"] = {
+        "what": "measured lengths fixed; per-arm joint offsets on the range-middle zero",
+        "points": [{"side": s, "point": pt, "measured_mm": round(1000 * h, 1),
+                    "fit_mm": round(1000 * kin.point_height(st, s, pt), 1)} for st, s, pt, h in poses],
+        "homing_prediction_deg": {s: {mtr: round(math.degrees(((homing[s][mtr]["range_min"] + homing[s][mtr]["range_max"]) / 2
+                                                               - 2047) * 2 * math.pi / 4095), 1) for mtr in motors} for s in SIDES},
+        "contacts_cm": None if not rows else [round(100 * kin.clearance(r.present), 2) for r in rows if r.present],
+    }
+    return geom
+
+
 def _load_state(path) -> dict:
     d = json.loads(Path(os.path.expanduser(str(path))).read_text())
     return {k: v for k, v in d.get("positions", d).items() if k.startswith("right")}
@@ -314,7 +387,23 @@ def main(argv=None):
     fp.add_argument("--holdout-every", type=int, default=4, help="hold out every Nth contact row for checking")
     fp.add_argument("--out", default=str(GEOMETRY_FILE))
     fp.add_argument("--max-nfev", type=int, default=200)
+    mp = sub.add_parser("measured", help="fit per-arm offsets from the measurement card (measurements.json)")
+    mp.add_argument("--measurements", required=True)
+    mp.add_argument("--contacts", action="append", default=[], help="optional table-probe JSON as a check term")
+    mp.add_argument("--out", default=str(GEOMETRY_FILE))
     a = ap.parse_args(argv)
+
+    if a.cmd == "measured":
+        fixed, poses = load_measurements(a.measurements)
+        geom = fit_measured(fixed, poses, load_rows(a.contacts) if a.contacts else None)
+        old = json.loads(Path(a.out).read_text()) if Path(a.out).exists() else {}
+        if "overhead_camera" in old:
+            geom["overhead_camera"] = old["overhead_camera"]  # keep the fitted camera
+        Path(a.out).write_text(json.dumps(geom, indent=2) + "\n")
+        print(json.dumps({k: geom[k] for k in ("lengths_m", "joint_offsets_deg")}, indent=2))
+        print(json.dumps(geom["fit"], indent=2))
+        print(f"wrote {a.out}")
+        return
 
     rows = load_rows(a.contacts)
     anchors = [_load_state(p) for p in a.anchor]
