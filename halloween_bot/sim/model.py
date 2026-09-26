@@ -10,7 +10,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from .calib import MOTORS, SIDES, Calibration
+from .calib import GEOMETRY_FILE, MOTORS, SIDES, Calibration
 
 HERE = Path(__file__).resolve().parent
 ARM_XML = HERE / "menagerie_so101" / "so101.xml"
@@ -142,7 +142,50 @@ def apply_params(model: mujoco.MjModel, params: dict) -> None:
                     arr[dof] = p[field]
 
 
-def build_model(params: dict | None = None, calib: Calibration | None = None, props: bool = True) -> mujoco.MjModel:
+def load_geometry(path: Path = GEOMETRY_FILE) -> dict:
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def _stretch(body, dx: float):
+    """Move a body along its offset from the parent: lengthens that link by dx."""
+    v = np.array(body.pos)
+    body.pos[:] = v + dx * v / np.linalg.norm(v)
+
+
+def apply_geometry(model: mujoco.MjModel, geometry: dict) -> None:
+    """Kinematic-calibration deltas (kincal.py), both arms. Call once on a freshly compiled model.
+
+    geometry = {"lengths_m": {upper_arm_dx, forearm_dx, claw_dx, base_dz}, "base_pitch_deg": float,
+                "overhead_camera": {pos, quat}}:
+    the upper arm and forearm grow along their links, the claws slide out along the wrist-roll axis
+    (gripper -z), the bases rise off the table, and the overhead camera takes the fitted real pose.
+    """
+    g = (geometry or {}).get("lengths_m", {})
+    for side in SIDES:
+        _stretch(model.body(f"{side}_lower_arm"), g.get("upper_arm_dx", 0.0))
+        _stretch(model.body(f"{side}_wrist"), g.get("forearm_dx", 0.0))
+        grip = model.body(f"{side}_gripper")
+        axis = np.zeros(3)
+        mujoco.mju_rotVecQuat(axis, np.array([0.0, 0.0, -1.0]), grip.quat)
+        grip.pos[:] = grip.pos + g.get("claw_dx", 0.0) * axis
+        base = model.body(f"{side}_base")
+        base.pos[2] += g.get("base_dz", 0.0)
+        pitch = math.radians((geometry or {}).get("base_pitch_deg", 0.0))
+        if pitch:  # mount tilted forward (+) about the base's y axis: reach-proportional drop
+            dq, q = np.zeros(4), np.zeros(4)
+            mujoco.mju_axisAngle2Quat(dq, np.array([0.0, 1.0, 0.0]), pitch)
+            mujoco.mju_mulQuat(q, np.array(base.quat), dq)
+            base.quat[:] = q
+    cam = (geometry or {}).get("overhead_camera")
+    if cam:  # the real C922 pose, fit jointly with the arm geometry to the lit photos
+        cid = model.camera("overhead").id
+        model.cam_pos[cid] = cam["pos"]
+        model.cam_quat[cid] = cam["quat"]
+
+
+def build_model(params: dict | None = None, calib: Calibration | None = None, props: bool = True,
+                geometry: dict | None = None) -> mujoco.MjModel:
     model = build_spec(calib, props).compile()
     apply_params(model, load_params() if params is None else params)
+    apply_geometry(model, load_geometry() if geometry is None else geometry)
     return model

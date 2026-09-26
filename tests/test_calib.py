@@ -35,3 +35,17 @@ def test_gripper_maps_onto_jaw_range():
 def test_clamp_norm_bounds():
     assert clamp_norm("left_gripper.pos", -5) == 0 and clamp_norm("left_gripper.pos", 150) == 100
     assert clamp_norm("left_elbow_flex.pos", -150) == -100
+
+
+def test_homing_zero_shifts_by_range_middle_minus_2047_per_arm():
+    base = Calibration.load(geometry=None)
+    cal = Calibration(base.calib, zero={"shoulder_lift": "homing"})
+    for side in ("left", "right"):
+        c = base.calib[side]["shoulder_lift"]
+        shift = ((c["range_min"] + c["range_max"]) / 2 - 2047) * 2 * math.pi / 4095
+        k = f"{side}_shoulder_lift.pos"
+        assert cal.to_rad(k, 0) == pytest.approx(shift)  # normalized 0 = range middle, now `shift` from model zero
+        assert cal.to_norm(k, cal.to_rad(k, -40)) == pytest.approx(-40)
+    assert cal.to_rad("right_elbow_flex.pos", 10) == base.to_rad("right_elbow_flex.pos", 10)  # untouched joints
+    with pytest.raises(ValueError):
+        Calibration(base.calib, zero={"gripper": "homing"})

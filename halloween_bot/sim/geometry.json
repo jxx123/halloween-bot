@@ -1,0 +1,31 @@
+{
+  "overhead_camera": {
+    "pos": [
+      0.474639597277603,
+      -0.0308258100501665,
+      0.45537548235787323
+    ],
+    "quat": [
+      0.6643580663460822,
+      0.2354678971445289,
+      0.24266921501035713,
+      0.6665544847808657
+    ]
+  },
+  "fit": {
+    "what": "overhead camera only, re-fit 2026-09-26 to the lit overlay photos (~/sim_ref/overlay/*) with the arm model unchanged: blue-arm silhouette IoU 0.345 -> 0.643. The C922 was bumped during the rig visit that morning.",
+    "camera_delta": {
+      "pos_m": [
+        0.0346,
+        -0.0308,
+        -0.0346
+      ],
+      "rot_deg": [
+        7.2,
+        0.61,
+        -0.03
+      ]
+    },
+    "arm_geometry": "unchanged: kincal fits of the table contacts conflict with the wrist-camera evidence; see docs/sim/kincal_status.md"
+  }
+}
