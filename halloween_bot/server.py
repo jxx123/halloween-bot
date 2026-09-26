@@ -19,6 +19,7 @@ Start via:  python -m halloween_bot.ctl start   (refuses to run while teleop/rec
 import json
 import subprocess
 import sys
+import urllib.request
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +33,14 @@ from lerobot.robots.bi_so_follower import BiSOFollower, BiSOFollowerConfig
 from lerobot.robots.so_follower.config_so_follower import SOFollowerConfig
 from lerobot.teleoperators.bi_so_leader import BiSOLeader, BiSOLeaderConfig
 from lerobot.teleoperators.so_leader.config_so_leader import SOLeaderConfig
+
+from halloween_bot.policy_runner import (
+    PI0FAST_CAMERAS,
+    PI0FAST_IMAGE_HW,
+    PolicyRunner,
+    fit_image,
+    handle_http as policy_http,
+)
 
 PORT = 8399
 CONTROL_HZ = 30
@@ -85,6 +94,7 @@ httpd = None
 
 leader = None
 teleop_on = threading.Event()
+runner = None  # PolicyRunner, created in main() after the robot connects
 
 
 def cams() -> dict:
@@ -120,6 +130,32 @@ def do_move(targets: dict[str, float], duration: float) -> dict:
         time.sleep(1.0 / CONTROL_HZ)
     final = read_positions()
     return {"ok": True, "requested": {k: goal[k] for k in targets}, "reached": {k: final[k] for k in targets}}
+
+
+def do_trajectory(points: list[dict], hz: float) -> dict:
+    """Stream raw waypoints at a fixed rate (sys-ID collector). Same clamps/caps as /move.
+
+    `present` is sampled BEFORE each send so trace rows align command with the state it
+    was issued against. Unspecified joints hold the previous command (not the sagged
+    present), so callers should pin the idle arm explicitly in every point.
+    """
+    valid = set(robot.action_features)
+    unknown = sorted({k for p in points for k in p if k not in valid})
+    if unknown:
+        return {"error": f"unknown joint keys: {unknown}", "valid_keys": sorted(valid)}
+    hz = max(1.0, min(100.0, float(hz)))
+    hold = read_positions()
+    trace = []
+    t0 = time.perf_counter()
+    for i, p in enumerate(points, start=1):
+        present = read_positions()
+        cmd = {**hold, **{k: clamp(k, v) for k, v in p.items()}}
+        hold = cmd
+        robot.send_action(cmd)  # per-tick max_relative_target cap still applies
+        trace.append({"t": time.perf_counter() - t0, "present": present, "cmd": cmd})
+        time.sleep(max(0.0, i / hz - (time.perf_counter() - t0)))
+    trace.append({"t": time.perf_counter() - t0, "present": read_positions(), "cmd": None})
+    return {"ok": True, "hz": hz, "trace": trace}
 
 
 def restart_camera(name: str) -> dict:
@@ -179,6 +215,40 @@ def set_teleop(enable: bool) -> dict:
         return {"ok": True, "enabled": False, "msg": "teleop OFF — followers hold their pose"}
 
 
+def policy_obs() -> dict:
+    # Camera reads stay OUTSIDE the robot lock: a wedged C922 (2 s timeout x3) must not
+    # stall policy_send / /move. async_read only copies the camera thread's latest frame.
+    frames = {PI0FAST_CAMERAS[n]: fit_image(cams()[n].async_read(timeout_ms=2000)) for n in PI0FAST_CAMERAS}
+    with lock:
+        obs = read_positions()
+    return {**obs, **frames}
+
+
+def policy_send(action: dict) -> None:
+    with lock:
+        robot.send_action(action)
+
+
+def sim_holds_policy_server() -> str | None:
+    """The 5090 sim shares the pi policy server; refuse to start while its run is live.
+
+    A lerobot policy_server has one observation queue and no client identity — overlapped
+    runs would hand the real arms chunks computed from SIM frames. Requires the tunnel
+    forward -L 18399:127.0.0.1:8399 (the sim server) next to the 8080 policy forward.
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:18399/policy", timeout=2) as r:
+            if json.loads(r.read()).get("running"):
+                return "the 5090 sim is running pi on the shared policy server"
+    except Exception:
+        pass  # sim down or unreachable = not using the shared server
+    return None
+
+
+def policy_running() -> bool:
+    return bool(runner and runner.status().get("running"))
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
@@ -194,9 +264,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         try:
-            if url.path == "/state":
+            if runner is not None and (r := policy_http(runner, "GET", url.path, {})):
+                self._reply(r[1], r[0])
+            elif url.path == "/state":
                 with lock:
-                    self._reply({"ok": True, "positions": read_positions(), "teleop": teleop_on.is_set()})
+                    self._reply({"ok": True, "positions": read_positions(), "teleop": teleop_on.is_set(),
+                                 "policy": runner.status() if runner else None})
             elif url.path == "/teleop":
                 self._reply({"ok": True, "enabled": teleop_on.is_set()})
             elif url.path == "/cam":
@@ -237,18 +310,39 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}")
-            if url.path == "/move":
+            if url.path in ("/move", "/trajectory"):
                 if teleop_on.is_set():
                     self._reply({"error": "teleop is active — the human has the controls. Turn teleop off first."}, 409)
                     return
                 with lock:
-                    self._reply(do_move(payload.get("targets", {}), payload.get("duration", 2.0)))
+                    if policy_running():  # checked under the lock: a queued /move can't slip past a start
+                        self._reply({"error": "the pi policy is driving the arms — POST /policy/stop first."}, 409)
+                    elif url.path == "/move":
+                        self._reply(do_move(payload.get("targets", {}), payload.get("duration", 2.0)))
+                    else:
+                        self._reply(do_trajectory(payload.get("points", []), payload.get("hz", 30.0)))
+            elif url.path == "/policy" and runner is not None:
+                if not lock.acquire(blocking=False):
+                    self._reply({"ok": False, "error": "a move is in progress — try again when it finishes"}, 409)
+                    return
+                try:
+                    r = policy_http(runner, "POST", url.path, payload)
+                finally:
+                    lock.release()
+                self._reply(r[1], r[0])
             elif url.path == "/teleop":
+                if bool(payload.get("enabled")) and policy_running():
+                    self._reply({"error": "the pi policy is driving the arms — POST /policy/stop first."}, 409)
+                    return
                 self._reply(set_teleop(bool(payload.get("enabled"))))
             elif url.path == "/cam_restart":
                 with lock:
                     self._reply(restart_camera(payload.get("name", "overhead")))
+            elif runner is not None and (r := policy_http(runner, "POST", url.path, payload)):
+                self._reply(r[1], r[0])
             elif url.path == "/stop":
+                if policy_running():
+                    runner.stop()
                 self._reply({"ok": True, "msg": "disconnecting (torque off) and shutting down"})
                 threading.Thread(target=shutdown, daemon=True).start()
             else:
@@ -274,6 +368,17 @@ def main():
     print("connecting robot (arms will hold their current pose)...", flush=True)
     robot.connect(calibrate=False)
     print("robot connected, torque ON", flush=True)
+    global runner
+    runner = PolicyRunner(
+        policy_obs,
+        policy_send,
+        list(robot.action_features),
+        {**{k: float for k in robot.action_features},
+         **{f: (*PI0FAST_IMAGE_HW, 3) for f in PI0FAST_CAMERAS.values()}},
+        server_address="127.0.0.1:8080",  # serve_5090.sh tunnel to the OMEN policy server
+        blocked_by=sim_holds_policy_server,
+    )
+    print("pi policy runner mounted: POST /policy {task, seconds}", flush=True)
     # Bind localhost plus the tailnet address (if up) — never the plain LAN.
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     extra_hosts = []

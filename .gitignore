@@ -12,3 +12,7 @@ __pycache__/
 .venv/
 *.egg-info/
 dist/
+
+# pytest
+.pytest_cache/
+MUJOCO_LOG.TXT
