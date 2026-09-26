@@ -5,11 +5,14 @@ import pytest
 
 from halloween_bot.sim.calib import KEYS
 from halloween_bot.sim.engine import MAX_RELATIVE_TARGET, REST, SimEngine
+from halloween_bot.sim.model import PARAMS_FILE, build_model
 
 
 @pytest.fixture(scope="module")
 def eng():
-    return SimEngine()
+    # command-semantics tests run on Menagerie's stiff servos; the fitted (soft, sagging)
+    # servos are covered by test_fitted_servos_sag_like_the_real_arm and tests/test_sysid.py
+    return SimEngine(model=build_model(params={}))
 
 
 def test_reset_is_rest_pose(eng):
@@ -45,6 +48,16 @@ def test_move_reaches_target_headless(eng):
     assert pos["right_shoulder_lift.pos"] == pytest.approx(-60, abs=4)
     assert pos["right_elbow_flex.pos"] == pytest.approx(70, abs=4)
     assert pos["left_gripper.pos"] == pytest.approx(80, abs=4)
+
+
+@pytest.mark.skipif(not PARAMS_FILE.exists(), reason="no fitted params.json")
+def test_fitted_servos_sag_like_the_real_arm():
+    """Real elbow holds a few units above command when it comes down to a target (sys-ID report)."""
+    e = SimEngine()  # loads params.json
+    e.move({"right_shoulder_lift.pos": -60, "right_elbow_flex.pos": 70}, 2.0)
+    e.step(1.0)
+    over = e.read_positions()["right_elbow_flex.pos"] - 70
+    assert 0.5 < over < 9, over
 
 
 def test_move_unknown_key_returns_real_error_shape(eng):
