@@ -52,8 +52,8 @@ L_LEADER = "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6055292-if00"  # ora
 R_LEADER = "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AE6055274-if00"  # blue / right
 # Wrist cams are identical Sonix models (by-id collides) -> use by-path (port-stable).
 # Orange moved to a former leader port (usb-0:11) in the 2026-09-26 USB shuffle.
-LEFT_CAM = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:11:1.0-video-index0"
-RIGHT_CAM = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:5:1.0-video-index0"
+LEFT_CAM = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:11:1.0-video-index0"   # orange claw verified in frame
+RIGHT_CAM = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:12:1.0-video-index0"  # blue claws verified in frame
 # Logitech C922, unique serial -> stable path. The two wrist cams are identical models
 # (colliding by-id names), so they stay on raw /dev/video* paths.
 OVERHEAD_CAM = "/dev/v4l/by-id/usb-046d_C922_Pro_Stream_Webcam_59D955BF-video-index0"
