@@ -8,13 +8,16 @@ dependencies = [
     # lerobot provides the SO101 drivers (so_follower / bi_so_follower), cameras,
     # calibration, policy runtimes, and remote inference (policy_server/robot_client)
     "lerobot[smolvla,async,feetech]>=0.6.1",
-    "opencv-python>=4.9",
+    "opencv-python-headless>=4.9",  # same build lerobot pulls in; two cv2 wheels clobber each other
     "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
 # policy evaluation / rollouts against Hub checkpoints
 eval = ["lerobot[dataset]>=0.6.1"]
+# MuJoCo twin + sys-ID. lerobot pinned to the ~/pi-serve policy server's version:
+# observations/actions are pickled across the gRPC link, so both ends must match.
+sim = ["lerobot==0.6.1", "mujoco>=3.3", "scipy>=1.11", "pandas>=2.0", "pyarrow>=15", "pytest>=8"]
 
 [project.scripts]
 halloween-server = "halloween_bot.server:main"
@@ -29,3 +32,4 @@ include = ["halloween_bot*"]
 
 [tool.setuptools.package-data]
 "halloween_bot.app" = ["static/*.html", "persona.md"]
+"halloween_bot.sim" = ["assets/*", "assets/**/*", "calibration/*.json", "params.json"]
