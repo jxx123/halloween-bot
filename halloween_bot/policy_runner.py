@@ -21,7 +21,9 @@ import threading
 import time
 from collections.abc import Callable
 
+import cv2
 import grpc
+import numpy as np
 
 from lerobot.async_inference.helpers import RemotePolicyConfig, TimedObservation
 from lerobot.transport import services_pb2, services_pb2_grpc
@@ -32,6 +34,20 @@ DEFAULT_CHECKPOINT = "delvingdeep/pi0fast-so101-bimanual"
 DEFAULT_TASK = "Grasp the toy and place it in the basket."
 # robot camera name -> the checkpoint's image feature name
 PI0FAST_CAMERAS = {"overhead": "base_0_rgb", "left_wrist": "left_wrist_0_rgb", "right_wrist": "right_wrist_0_rgb"}
+PI0FAST_IMAGE_HW = (480, 640)  # the real pi0fast client captured all three cams at 640x480
+
+
+def fit_image(img: np.ndarray, hw: tuple[int, int] = PI0FAST_IMAGE_HW) -> np.ndarray:
+    """Center-crop to hw's aspect (the C922's 4:3 mode crops the sides of its 16:9 view), then resize."""
+    h, w = hw
+    ih, iw = img.shape[:2]
+    if iw * h > ih * w:
+        cw = ih * w // h
+        img = img[:, (iw - cw) // 2:(iw - cw) // 2 + cw]
+    elif iw * h < ih * w:
+        ch = iw * h // w
+        img = img[(ih - ch) // 2:(ih - ch) // 2 + ch]
+    return img if img.shape[:2] == hw else cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
 
 
 class PolicyBusy(RuntimeError):

@@ -167,3 +167,12 @@ def test_handle_http_routes():
     assert handle_http(r, "POST", "/policy", {"task": "x"})[0] == 503
     assert handle_http(r, "POST", "/policy/stop", {})[0] == 200
     assert handle_http(r, "GET", "/state", {}) is None
+
+
+def test_fit_image_crops_16_9_to_4_3_then_resizes():
+    from halloween_bot.policy_runner import fit_image
+    img = np.zeros((720, 1280, 3), np.uint8)
+    img[:, 160:1120] = 255  # the central 4:3 region
+    out = fit_image(img)
+    assert out.shape == (480, 640, 3) and out.min() == 255
+    assert fit_image(np.zeros((480, 640, 3), np.uint8)).shape == (480, 640, 3)

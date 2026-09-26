@@ -27,34 +27,25 @@ from urllib.parse import parse_qs, urlparse
 
 import cv2
 
-from ..policy_runner import PI0FAST_CAMERAS, PolicyRunner, handle_http
+from ..policy_runner import PI0FAST_CAMERAS, PI0FAST_IMAGE_HW, PolicyRunner, fit_image, handle_http
 from .calib import KEYS
 from .engine import SimEngine
 from .model import CAMERA_NAMES
 
 PORT = 8399
 FRAMES_DIR = Path.home() / "lerobot/outputs/claude_robot/frames"
-POLICY_IMAGE_HW = (480, 640)  # the real pi0fast client captured all three cams at 640x480
 
 
 def policy_observation(engine: SimEngine) -> dict:
     """Joint state + the three rig cameras renamed/shaped the way the real pi0fast client sent them."""
     obs = engine.read_positions()
-    h, w = POLICY_IMAGE_HW
     for cam, feature in PI0FAST_CAMERAS.items():
-        img = engine.get_frame(cam)
-        ih, iw = img.shape[:2]
-        if iw * h != ih * w:  # C922 16:9 -> its 4:3 mode crops the sides
-            cw = ih * w // h
-            x0 = (iw - cw) // 2
-            img = img[:, x0:x0 + cw]
-        obs[feature] = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+        obs[feature] = fit_image(engine.get_frame(cam))
     return obs
 
 
 def policy_features() -> dict:
-    h, w = POLICY_IMAGE_HW
-    return {**{k: float for k in KEYS}, **{f: (h, w, 3) for f in PI0FAST_CAMERAS.values()}}
+    return {**{k: float for k in KEYS}, **{f: (*PI0FAST_IMAGE_HW, 3) for f in PI0FAST_CAMERAS.values()}}
 
 
 def make_app(engine: SimEngine, runner=None, frames_dir: Path = FRAMES_DIR, on_stop=None):
