@@ -1,0 +1,169 @@
+import pickle
+import threading
+import time
+
+import grpc
+import numpy as np
+import pytest
+import torch
+from lerobot.async_inference.helpers import TimedAction
+from lerobot.transport import services_pb2
+
+from halloween_bot.policy_runner import PolicyBusy, PolicyRunner, PolicyUnavailable, handle_http
+
+KEYS = [f"k{i}" for i in range(12)]
+FEATURES = {**{k: float for k in KEYS}, "base_0_rgb": (8, 8, 3)}
+
+
+class Unavailable(grpc.RpcError):
+    def code(self):
+        return grpc.StatusCode.UNAVAILABLE
+
+
+class FakeStub:
+    """Answers each must_go observation with a chunk of `chunk` actions valued at their timestep."""
+
+    def __init__(self, reachable=True, chunk=10, delay=0.05):
+        self.reachable, self.chunk, self.delay = reachable, chunk, delay
+        self.instructions = 0
+        self.obs = []
+        self.pending = []
+        self.cv = threading.Condition()
+        self.serve = True
+
+    def Ready(self, req, timeout=None):
+        if not self.reachable:
+            raise Unavailable()
+        return services_pb2.Empty()
+
+    def SendPolicyInstructions(self, req, timeout=None):
+        self.instructions += 1
+        self.serve = True
+        return services_pb2.Empty()
+
+    def SendObservations(self, it, timeout=None):
+        obs = pickle.loads(b"".join(m.data for m in it))
+        self.obs.append(obs)
+        if obs.must_go and self.serve:
+            with self.cv:
+                self.pending.append(obs)
+                self.cv.notify()
+        return services_pb2.Empty()
+
+    def GetActions(self, req, timeout=None):
+        with self.cv:
+            if not self.pending:
+                self.cv.wait(0.2)
+            if not self.pending:
+                return services_pb2.Actions(data=b"")
+            obs = self.pending.pop(0)
+        time.sleep(self.delay)
+        t0 = obs.get_timestep()
+        acts = [TimedAction(timestamp=time.time(), timestep=t0 + i, action=torch.full((12,), float(t0 + i)))
+                for i in range(self.chunk)]
+        return services_pb2.Actions(data=pickle.dumps(acts))
+
+
+class FakeChannel:
+    def close(self):
+        pass
+
+
+def make(stub, **kw):
+    sent = []
+    r = PolicyRunner(lambda: {**{k: 0.0 for k in KEYS}, "base_0_rgb": np.zeros((8, 8, 3), np.uint8)},
+                     sent.append, KEYS, FEATURES, fps=100, stub_factory=lambda addr: (FakeChannel(), stub), **kw)
+    return r, sent
+
+
+def wait_done(r, t=5):
+    end = time.time() + t
+    while r.running and time.time() < end:
+        time.sleep(0.02)
+    assert not r.running
+
+
+def test_start_fails_fast_when_unreachable():
+    r, _ = make(FakeStub(reachable=False))
+    t = time.time()
+    with pytest.raises(PolicyUnavailable, match="unreachable"):
+        r.start("t", 1)
+    assert time.time() - t < 2 and not r.running and r.status()["phase"] == "idle"
+
+
+def test_runs_executes_actions_in_order_and_finishes():
+    stub = FakeStub()
+    r, sent = make(stub)
+    r.start("pick", seconds=0.3)
+    wait_done(r)
+    st = r.status()
+    assert st["phase"] == "done" and st["executed"] >= 10 and st["chunks"] >= 2
+    vals = [a["k0"] for a in sent]
+    assert vals == sorted(vals)  # timesteps executed monotonically
+    assert stub.instructions == 1 and stub.obs[0].observation["task"] == "pick"
+    assert set(stub.obs[0].observation) >= set(KEYS) | {"base_0_rgb", "task"}
+
+
+def test_second_start_is_busy_and_stop_works():
+    r, _ = make(FakeStub())
+    r.start("t", seconds=30)
+    with pytest.raises(PolicyBusy):
+        r.start("t", 1)
+    st = r.stop()
+    assert not st["running"] and st["phase"] == "stopped"
+
+
+def test_instructions_sent_once_across_runs():
+    stub = FakeStub()
+    r, _ = make(stub)
+    r.start("a", 0.1)
+    wait_done(r)
+    r.start("b", 0.1)
+    wait_done(r)
+    assert stub.instructions == 1
+
+
+def test_reinstructs_when_no_chunk_arrives():
+    stub = FakeStub()
+    r, _ = make(stub, first_chunk_timeout=0.5)
+    r.start("a", 0.1)
+    wait_done(r)
+    stub.serve = False  # a restarted server that lost the policy
+    r.start("b", 0.2)
+    wait_done(r, 10)
+    assert stub.instructions == 2 and r.status()["phase"] == "done"
+
+
+def test_lockstep_pauses_during_inference_and_resumes():
+    calls = []
+    r, _ = make(FakeStub(delay=0.1), pause=lambda: calls.append("pause"), resume=lambda: calls.append("resume"))
+    r.start("t", seconds=0.25, lockstep=True)
+    wait_done(r)
+    assert calls[0] == "pause" and calls.count("pause") == calls.count("resume") >= 2
+
+
+def test_stop_during_lockstep_resumes_physics():
+    calls = []
+    stub = FakeStub()
+    stub.serve = False  # never answers -> stuck waiting while paused
+    r, _ = make(stub, pause=lambda: calls.append("pause"), resume=lambda: calls.append("resume"),
+                first_chunk_timeout=60)
+    r._instructed = True  # skip loading: straight to the paused wait
+    r.start("t", seconds=5, lockstep=True)
+    time.sleep(0.3)
+    r.stop()
+    assert calls and calls[-1] == "resume" and calls.count("pause") == calls.count("resume")
+
+
+def test_lockstep_requires_hooks():
+    r, _ = make(FakeStub())
+    with pytest.raises(ValueError):
+        r.start("t", 1, lockstep=True)
+
+
+def test_handle_http_routes():
+    r, _ = make(FakeStub(reachable=False))
+    assert handle_http(r, "GET", "/policy", {})[0] == 200
+    assert handle_http(r, "POST", "/policy", {"task": "x"})[0] == 503
+    assert handle_http(r, "POST", "/policy/stop", {})[0] == 200
+    assert handle_http(r, "GET", "/state", {}) is None
