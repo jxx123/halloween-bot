@@ -19,6 +19,7 @@ Start via:  python -m halloween_bot.ctl start   (refuses to run while teleop/rec
 import json
 import subprocess
 import sys
+import urllib.request
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -215,15 +216,33 @@ def set_teleop(enable: bool) -> dict:
 
 
 def policy_obs() -> dict:
+    # Camera reads stay OUTSIDE the robot lock: a wedged C922 (2 s timeout x3) must not
+    # stall policy_send / /move. async_read only copies the camera thread's latest frame.
+    frames = {PI0FAST_CAMERAS[n]: fit_image(cams()[n].async_read(timeout_ms=2000)) for n in PI0FAST_CAMERAS}
     with lock:
         obs = read_positions()
-        frames = {PI0FAST_CAMERAS[n]: fit_image(cams()[n].async_read(timeout_ms=2000)) for n in PI0FAST_CAMERAS}
     return {**obs, **frames}
 
 
 def policy_send(action: dict) -> None:
     with lock:
         robot.send_action(action)
+
+
+def sim_holds_policy_server() -> str | None:
+    """The 5090 sim shares the pi policy server; refuse to start while its run is live.
+
+    A lerobot policy_server has one observation queue and no client identity — overlapped
+    runs would hand the real arms chunks computed from SIM frames. Requires the tunnel
+    forward -L 18399:127.0.0.1:8399 (the sim server) next to the 8080 policy forward.
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:18399/policy", timeout=2) as r:
+            if json.loads(r.read()).get("running"):
+                return "the 5090 sim is running pi on the shared policy server"
+    except Exception:
+        pass  # sim down or unreachable = not using the shared server
+    return None
 
 
 def policy_running() -> bool:
@@ -357,6 +376,7 @@ def main():
         {**{k: float for k in robot.action_features},
          **{f: (*PI0FAST_IMAGE_HW, 3) for f in PI0FAST_CAMERAS.values()}},
         server_address="127.0.0.1:8080",  # serve_5090.sh tunnel to the OMEN policy server
+        blocked_by=sim_holds_policy_server,
     )
     print("pi policy runner mounted: POST /policy {task, seconds}", flush=True)
     # Bind localhost plus the tailnet address (if up) — never the plain LAN.
