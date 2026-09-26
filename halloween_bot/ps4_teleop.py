@@ -46,7 +46,7 @@ JS_EVENT = struct.Struct("IhBB")
 H_SHOULDER, L1, L2_LINK, L3 = 116.6, 116.0, 135.0, 160.0
 PSI0 = -0.09  # tool-pitch constant so FK matches the stock all-zero tip height
 
-ARM_LAT = {"left": -1.0, "right": 1.0}  # orange pan calibration is mirrored vs blue
+ARM_LAT = {"left": 1.0, "right": 1.0}  # user-validated: both arms same lateral sense
 
 READY = {"shoulder_pan.pos": -5.0, "shoulder_lift.pos": -55.0, "elbow_flex.pos": 60.0,
          "wrist_flex.pos": 30.0, "wrist_roll.pos": -10.0, "gripper.pos": 50.0}
