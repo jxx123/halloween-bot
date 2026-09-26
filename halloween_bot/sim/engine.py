@@ -145,7 +145,7 @@ class SimEngine:
                 adr = self.model.jnt_qposadr[jid]
                 self.data.qpos[adr:adr + 7] = [x, y, 0.04, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
             mujoco.mj_forward(self.model, self.data)
-        self._resync.set()
+            self._resync.set()  # inside the lock: the physics loop can't step on a stale clock anchor
 
     def start(self):
         if self._running.is_set():
@@ -177,12 +177,12 @@ class SimEngine:
         dt = self.model.opt.timestep
         sim0, wall0 = self.data.time, time.perf_counter()
         while self._running.is_set():
+            if self._paused.is_set():  # before resync: resume() re-arms it for the first live step
+                time.sleep(0.005)
+                continue
             if self._resync.is_set():
                 self._resync.clear()
                 sim0, wall0 = self.data.time, time.perf_counter()
-            if self._paused.is_set():
-                time.sleep(0.005)
-                continue
             behind = (time.perf_counter() - wall0) - (self.data.time - sim0)
             n = int(behind / dt)
             if n <= 0:

@@ -84,6 +84,8 @@ def make_app(engine: SimEngine, runner=None, frames_dir: Path = FRAMES_DIR, on_s
                     time.sleep(1 / 15)
             except (BrokenPipeError, ConnectionResetError):
                 pass  # viewer closed the tab
+            except Exception as e:  # headers are already sent: end the stream, don't write a reply into it
+                print(f"stream {name} ended: {type(e).__name__}: {e}", flush=True)
 
         def do_GET(self):
             url = urlparse(self.path)
@@ -121,14 +123,24 @@ def make_app(engine: SimEngine, runner=None, frames_dir: Path = FRAMES_DIR, on_s
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 payload = json.loads(self.rfile.read(n) or b"{}")
-                if url.path in ("/move", "/trajectory") and policy_running():
-                    self._reply({"error": "the π policy is driving the arms — POST /policy/stop first."}, 409)
-                elif url.path == "/move":
+                if url.path in ("/move", "/trajectory"):
                     with busy:
-                        self._reply(engine.move(payload.get("targets", {}), payload.get("duration", 2.0)))
-                elif url.path == "/trajectory":
-                    with busy:
-                        self._reply(engine.run_trajectory(payload.get("points", []), payload.get("hz", 30.0)))
+                        if policy_running():  # checked under the lock: a queued /move can't slip past a start
+                            self._reply({"error": "the π policy is driving the arms — POST /policy/stop first."},
+                                        409)
+                        elif url.path == "/move":
+                            self._reply(engine.move(payload.get("targets", {}), payload.get("duration", 2.0)))
+                        else:
+                            self._reply(engine.run_trajectory(payload.get("points", []), payload.get("hz", 30.0)))
+                elif url.path == "/policy" and runner is not None:
+                    if not busy.acquire(blocking=False):
+                        self._reply({"ok": False, "error": "a move is in progress — try again when it finishes"}, 409)
+                        return
+                    try:
+                        r = handle_http(runner, "POST", url.path, payload)
+                    finally:
+                        busy.release()
+                    self._reply(r[1], r[0])
                 elif url.path == "/sim/reset":
                     if policy_running():
                         runner.stop()

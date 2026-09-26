@@ -110,3 +110,17 @@ def test_policy_routes_mounted(base):
     url, _ = base
     code, out = call(url + "/policy")
     assert code == 200 and out["phase"] == "idle"
+
+
+def test_policy_start_rejected_while_a_move_runs(base):
+    url, runner = base
+    t = threading.Thread(target=call, args=(url + "/move", {"targets": {"left_gripper.pos": 20}, "duration": 2.0}))
+    t.start()
+    import time
+    time.sleep(0.4)
+    try:
+        code, out = call(url + "/policy", {"task": "x"})
+        assert code == 409 and "move" in out["error"] and not runner.running
+    finally:
+        t.join()
+        runner.running = False
