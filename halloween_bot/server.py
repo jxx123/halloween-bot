@@ -122,6 +122,32 @@ def do_move(targets: dict[str, float], duration: float) -> dict:
     return {"ok": True, "requested": {k: goal[k] for k in targets}, "reached": {k: final[k] for k in targets}}
 
 
+def do_trajectory(points: list[dict], hz: float) -> dict:
+    """Stream raw waypoints at a fixed rate (sys-ID collector). Same clamps/caps as /move.
+
+    `present` is sampled BEFORE each send so trace rows align command with the state it
+    was issued against. Unspecified joints hold the previous command (not the sagged
+    present), so callers should pin the idle arm explicitly in every point.
+    """
+    valid = set(robot.action_features)
+    unknown = sorted({k for p in points for k in p if k not in valid})
+    if unknown:
+        return {"error": f"unknown joint keys: {unknown}", "valid_keys": sorted(valid)}
+    hz = max(1.0, min(100.0, float(hz)))
+    hold = read_positions()
+    trace = []
+    t0 = time.perf_counter()
+    for i, p in enumerate(points, start=1):
+        present = read_positions()
+        cmd = {**hold, **{k: clamp(k, v) for k, v in p.items()}}
+        hold = cmd
+        robot.send_action(cmd)  # per-tick max_relative_target cap still applies
+        trace.append({"t": time.perf_counter() - t0, "present": present, "cmd": cmd})
+        time.sleep(max(0.0, i / hz - (time.perf_counter() - t0)))
+    trace.append({"t": time.perf_counter() - t0, "present": read_positions(), "cmd": None})
+    return {"ok": True, "hz": hz, "trace": trace}
+
+
 def restart_camera(name: str) -> dict:
     """Reconnect a stalled camera (C922 video can wedge when its mic is opened)."""
     cam = cams().get(name)
@@ -243,6 +269,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 with lock:
                     self._reply(do_move(payload.get("targets", {}), payload.get("duration", 2.0)))
+            elif url.path == "/trajectory":
+                if teleop_on.is_set():
+                    self._reply({"error": "teleop is active — the human has the controls."}, 409)
+                    return
+                with lock:
+                    self._reply(do_trajectory(payload.get("points", []), payload.get("hz", 30.0)))
             elif url.path == "/teleop":
                 self._reply(set_teleop(bool(payload.get("enabled"))))
             elif url.path == "/cam_restart":
