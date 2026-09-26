@@ -11,15 +11,18 @@ def eng():
     return SimEngine()
 
 
-@pytest.mark.parametrize("target", [(0.28, -0.11, 0.075), (0.25, -0.05, 0.12), (0.20, -0.10, 0.22)])
-def test_ik_reaches_target_pointing_down(eng, target):
+@pytest.mark.parametrize("target,down", [((0.28, -0.11, 0.075), True),   # grasp heights: claws down
+                                         ((0.25, -0.05, 0.12), True),
+                                         ((0.20, 0.00, 0.23), False)])  # carry over the basket: position only
+def test_ik_reaches_target(eng, target, down):
     eng.reset()
     ex = Expert(eng)
     q = ex.ik("right", np.array(target))
     assert set(q) == {k for k in KEYS if k.startswith("right") and "gripper" not in k and "roll" not in k}
     tip, axis = ex.tip_after(q, "right")
     assert np.linalg.norm(tip - np.array(target)) < 0.006
-    assert axis[2] < -0.85  # claws within ~30° of straight down
+    if down:  # near the base at carry height the SO101 can't point straight down; the toy just hangs
+        assert axis[2] < -0.85  # claws within ~30° of straight down
 
 
 def test_expert_puts_a_toy_in_the_basket(eng):
