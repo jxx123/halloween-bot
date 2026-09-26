@@ -44,6 +44,25 @@ def policy_observation(engine: SimEngine) -> dict:
     return obs
 
 
+def _foreign_connections(ss_output: str, pid: int) -> int:
+    """Established connections (from `ss -tnpH`) not owned by this process."""
+    return sum(1 for line in ss_output.splitlines() if line.strip() and f"pid={pid}," not in line)
+
+
+def other_policy_clients(port: int) -> str | None:
+    """The 1080 tunnels its real-robot π runs to this same policy server; name it if it's connected."""
+    try:
+        out = subprocess.run(["ss", "-tnpH", "state", "established", "(", "dport", "=", f":{port}", ")"],
+                             capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    n = _foreign_connections(out, os.getpid())
+    if not n:
+        return None
+    return (f"the shared π policy server :{port} is serving another client ({n} connection(s) — likely the "
+            "real robot via the 1080 tunnel); one π run at a time")
+
+
 def policy_features() -> dict:
     return {**{k: float for k in KEYS}, **{f: (*PI0FAST_IMAGE_HW, 3) for f in PI0FAST_CAMERAS.values()}}
 
@@ -188,8 +207,10 @@ def main(argv=None):
     engine.start()
     runner = None
     if not args.no_policy:
+        policy_port = int(args.policy_server.rsplit(":", 1)[1])
         runner = PolicyRunner(lambda: policy_observation(engine), engine.send_action, KEYS, policy_features(),
-                              server_address=args.policy_server, pause=engine.pause, resume=engine.resume)
+                              server_address=args.policy_server, pause=engine.pause, resume=engine.resume,
+                              blocked_by=lambda: other_policy_clients(policy_port))
     servers: list[ThreadingHTTPServer] = []
 
     def shutdown():

@@ -25,6 +25,9 @@ $PY -m halloween_bot.ctl stop              # real: torque OFF + server exit (see
 ```
 
 The whole 5090 stack (π policy server, sim server, web app) comes up with `./run_sim.sh`.
+The sim and the real robot share one π policy server (the 5090's :8081), so only one π run
+can happen at a time across both. If `ctl policy` says the server is serving another client,
+the other one (usually the real arms) has it. Wait, or use direct moves.
 
 ## Two ways to act
 

@@ -124,3 +124,12 @@ def test_policy_start_rejected_while_a_move_runs(base):
     finally:
         t.join()
         runner.running = False
+
+
+def test_other_policy_clients_ignores_our_own_connections():
+    from halloween_bot.sim.server import _foreign_connections
+    ss = ('ESTAB 0 0 127.0.0.1:51000 127.0.0.1:8081 users:(("python",pid=4242,fd=9))\n'
+          'ESTAB 0 0 127.0.0.1:51002 127.0.0.1:8081 users:(("sshd",pid=777,fd=12))\n'
+          'ESTAB 0 0 127.0.0.1:51004 127.0.0.1:8081\n')
+    assert _foreign_connections(ss, 4242) == 2
+    assert _foreign_connections(ss.splitlines()[0], 4242) == 0

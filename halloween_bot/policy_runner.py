@@ -78,7 +78,8 @@ class PolicyRunner:
                  actions_per_chunk: int = 50, chunk_size_threshold: float = 0.5,
                  obs_min_interval: float = 0.1, pause: Callable[[], None] | None = None,
                  resume: Callable[[], None] | None = None, connect_timeout: float = 5.0,
-                 load_timeout: float = 300.0, first_chunk_timeout: float = 20.0, stub_factory=None):
+                 load_timeout: float = 300.0, first_chunk_timeout: float = 20.0, stub_factory=None,
+                 blocked_by: Callable[[], str | None] | None = None):
         self.get_observation, self.send_action = get_observation, send_action
         self.action_keys = list(action_keys)
         self.lerobot_features = hw_to_dataset_features(observation_features, "observation", use_video=False)
@@ -90,6 +91,10 @@ class PolicyRunner:
         self.connect_timeout, self.load_timeout = connect_timeout, load_timeout
         self.first_chunk_timeout = first_chunk_timeout
         self._stub_factory = stub_factory or _default_stub_factory
+        # A lerobot policy_server has ONE observation queue and no notion of clients: two robots
+        # streaming to it at once get each other's action chunks. blocked_by() names another
+        # client if there is one; we refuse to start and yield mid-run (the other may be real arms).
+        self.blocked_by = blocked_by
         self._instructed = False
         self._lock = threading.Lock()
         self._start_lock = threading.Lock()  # claim a run atomically (double clicks, agent + dashboard)
@@ -120,6 +125,9 @@ class PolicyRunner:
         with self._start_lock:
             if self.running:
                 raise PolicyBusy("a policy run is already in progress (POST /policy/stop first)")
+            reason = self.blocked_by() if self.blocked_by else None
+            if reason:
+                raise PolicyBusy(reason)
             previous = self.status()
             self._stop.clear()
             self._fatal = None
@@ -295,12 +303,19 @@ class PolicyRunner:
 
     def _control_loop(self, stub, task: str, seconds: float, lockstep: bool):
         dt = 1.0 / self.fps
+        next_check = 0.0
         t_first = None
         executed = 0
         waiting_since = time.time()
         reinstructed = False
         while not self._stop.is_set():
             tick = time.perf_counter()
+            if self.blocked_by and tick >= next_check:
+                next_check = tick + 0.2
+                reason = self.blocked_by()
+                if reason:
+                    self._fatal = f"yielded the shared policy server: {reason}"
+                    return
             item = self._pop()
             if item is not None:
                 ts, vec = item

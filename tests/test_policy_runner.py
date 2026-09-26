@@ -246,3 +246,21 @@ def test_stop_cancels_a_blocking_model_load():
     t = time.time()
     st = r.stop()
     assert time.time() - t < 2 and not st["running"]
+
+
+def test_blocked_by_refuses_start():
+    r, _ = make(FakeStub(), blocked_by=lambda: "the real robot is using the policy server")
+    with pytest.raises(PolicyBusy, match="real robot"):
+        r.start("t", 1)
+    assert not r.running
+
+
+def test_run_yields_when_another_client_appears():
+    other = {"reason": None}
+    r, _ = make(FakeStub(), blocked_by=lambda: other["reason"])
+    r.start("t", seconds=30)
+    time.sleep(0.3)
+    other["reason"] = "the real robot connected"
+    wait_done(r, 3)
+    st = r.status()
+    assert st["phase"] == "error" and "real robot connected" in st["error"]

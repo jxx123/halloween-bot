@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Bring up the sim stack on the 5090: π₀-FAST policy server (:8081, ~/pi-serve venv with its
 # pi0_fast shims — never reinstall that venv), MuJoCo sim server (:8399), web app (:8500).
-# :8080 is left to the 1080's real-robot client. Logs: ~/lerobot/outputs/claude_robot/*.log
+# The :8081 policy server is SHARED: the 1080's real robot reaches it through its SSH tunnel
+# (workstation:8080 -> here:8081; two pi0fast copies don't fit on the GPU). One π run at a time:
+# the sim refuses to start, and yields mid-run, while another client is connected.
+# Logs: ~/lerobot/outputs/claude_robot/*.log
 set -euo pipefail
 cd "$(dirname "$0")"
 LOG=~/lerobot/outputs/claude_robot
