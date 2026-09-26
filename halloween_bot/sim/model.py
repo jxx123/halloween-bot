@@ -28,7 +28,8 @@ TOYS = {
 }
 # name: (pos, look_at, fovy_deg). overhead = the front-elevated C922 (hfov ~70° at 16:9).
 FIXED_CAMERAS = {
-    "overhead": ((0.62, 0.0, 0.45), (0.08, 0.0, 0.05), 43.3),
+    # fit to ~/sim_ref/overhead.jpg (rest pose): jaw tips + wrist cams of both arms, ~3% width residual
+    "overhead": ((0.44, 0.0, 0.49), (0.13, 0.0, 0.0), 43.3),
     "scene": ((0.55, -0.60, 0.50), (0.12, 0.0, 0.08), 50.0),
 }
 CAMERA_NAMES = {"overhead": "overhead", "left_wrist": "left_wrist_cam",
