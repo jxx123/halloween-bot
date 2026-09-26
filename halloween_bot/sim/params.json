@@ -1,57 +1,63 @@
 {
   "motors": {
     "shoulder_pan": {
-      "kp": 70.525577,
-      "kv": 7.239093,
-      "damping": 0.241453,
-      "frictionloss": 0.550725,
-      "armature": 0.293304,
-      "forcerange": 4.861601
+      "kp": 1.589431,
+      "kv": 0.060827,
+      "damping": 0.109413,
+      "frictionloss": 0.016694,
+      "armature": 0.004063,
+      "forcerange": 0.226926
     },
     "shoulder_lift": {
-      "kp": 26.375752,
-      "kv": 2.111769,
-      "damping": 0.149371,
-      "frictionloss": 0.784057,
-      "armature": 0.087991,
-      "forcerange": 2.966958
+      "kp": 104.378758,
+      "kv": 12.612477,
+      "damping": 0.083514,
+      "frictionloss": 0.833434,
+      "armature": 0.021555,
+      "forcerange": 1.653207
     },
     "elbow_flex": {
-      "kp": 15.00592,
-      "kv": 1.095229,
-      "damping": 0.1236,
-      "frictionloss": 0.392521,
-      "armature": 0.023865,
-      "forcerange": 1.064606
+      "kp": 34.470479,
+      "kv": 4.569334,
+      "damping": 0.0767,
+      "frictionloss": 1.021755,
+      "armature": 0.049485,
+      "forcerange": 2.404582
     },
     "wrist_flex": {
-      "kp": 74.809046,
-      "kv": 7.622748,
-      "damping": 0.15632,
-      "frictionloss": 0.493742,
-      "armature": 0.188972,
-      "forcerange": 3.88422
+      "kp": 23.898029,
+      "kv": 2.21429,
+      "damping": 0.037024,
+      "frictionloss": 0.397236,
+      "armature": 0.074182,
+      "forcerange": 1.670564
     },
     "wrist_roll": {
-      "kp": 28.724065,
-      "kv": 1.595035,
-      "damping": 1.067585,
-      "frictionloss": 0.220536,
-      "armature": 0.093402,
-      "forcerange": 1.354955
+      "kp": 1.618009,
+      "kv": 0.136674,
+      "damping": 0.012934,
+      "frictionloss": 0.019488,
+      "armature": 0.004419,
+      "forcerange": 0.146944
     },
     "gripper": {
-      "kp": 148.717086,
-      "kv": 17.525621,
-      "damping": 0.830745,
-      "frictionloss": 0.13032,
-      "armature": 0.313374,
-      "forcerange": 5.974398
+      "kp": 0.494949,
+      "kv": 0.021631,
+      "damping": 0.036229,
+      "frictionloss": 0.01331,
+      "armature": 0.003519,
+      "forcerange": 0.468827
     }
   },
   "fit": {
     "traces": [
-      "so101_bimanual_test_dataset/ep0"
+      "so101_bimanual_test_dataset/ep0",
+      "right_shoulder_pan",
+      "right_shoulder_lift",
+      "right_elbow_flex",
+      "right_wrist_flex",
+      "right_wrist_roll",
+      "right_gripper"
     ],
     "fitted_motors": [
       "shoulder_pan",
@@ -92,63 +98,63 @@
       "right_shoulder_lift.pos": 113.3,
       "right_elbow_flex.pos": 141.25,
       "right_wrist_flex.pos": 57.82,
-      "right_wrist_roll.pos": 17.65,
+      "right_wrist_roll.pos": 40.0,
       "right_gripper.pos": 56.52
     },
-    "cost_init": 154.84878433086686,
-    "cost": 8.158100953473367,
-    "nfev": 17,
+    "cost_init": 1671.2209653790271,
+    "cost": 744.5504810031069,
+    "nfev": 18,
     "diff_step": 0.01,
     "status": 3,
     "message": "`xtol` termination condition is satisfied.",
-    "jac_condition": 946.1005110439,
-    "seconds": 62.9,
+    "jac_condition": 6.226083366506839e+301,
+    "seconds": 306.4,
     "starts": [
       {
         "diff_step": 0.001,
-        "cost": 10.797274930862454,
-        "nfev": 51
+        "cost": 1669.6501517705367,
+        "nfev": 20
       },
       {
         "diff_step": 0.003,
-        "cost": 8.200963728515763,
-        "nfev": 38
+        "cost": 895.9699323351973,
+        "nfev": 37
       },
       {
         "diff_step": 0.01,
-        "cost": 8.743660310866359,
-        "nfev": 42
+        "cost": 752.8551760316072,
+        "nfev": 34
       }
     ],
     "polish_step": 0.01,
     "holdout_rmse": {
       "menagerie": {
-        "left_shoulder_pan.pos": 0.49737938674190324,
-        "left_shoulder_lift.pos": 0.6195878165726486,
-        "left_elbow_flex.pos": 0.48163885831747605,
-        "left_wrist_flex.pos": 0.10017314273530209,
-        "left_wrist_roll.pos": 0.3585581652069313,
-        "left_gripper.pos": 0.11227621907301812,
-        "right_shoulder_pan.pos": 2.272869433540424,
-        "right_shoulder_lift.pos": 3.807101451927245,
-        "right_elbow_flex.pos": 3.0543025759302873,
-        "right_wrist_flex.pos": 2.3081855339578086,
-        "right_wrist_roll.pos": 0.5337678196428889,
-        "right_gripper.pos": 5.883951066184412
+        "left_shoulder_pan.pos": 0.21078914086428968,
+        "left_shoulder_lift.pos": 0.2625865370934823,
+        "left_elbow_flex.pos": 0.20552344434851608,
+        "left_wrist_flex.pos": 0.042813171003800575,
+        "left_wrist_roll.pos": 0.15195680989262525,
+        "left_gripper.pos": 0.04758286172092285,
+        "right_shoulder_pan.pos": 1.799784660665718,
+        "right_shoulder_lift.pos": 2.1713038774595166,
+        "right_elbow_flex.pos": 2.5291709526026156,
+        "right_wrist_flex.pos": 1.7914469228624434,
+        "right_wrist_roll.pos": 1.4090519463885476,
+        "right_gripper.pos": 2.4606848262383685
       },
       "fitted": {
-        "left_shoulder_pan.pos": 0.3208642063338327,
-        "left_shoulder_lift.pos": 0.02216698437783637,
-        "left_elbow_flex.pos": 0.9777031954869372,
-        "left_wrist_flex.pos": 0.1239062931379081,
-        "left_wrist_roll.pos": 0.356147193932971,
-        "left_gripper.pos": 0.10759519665118716,
-        "right_shoulder_pan.pos": 0.4003819610749636,
-        "right_shoulder_lift.pos": 2.5346962969436118,
-        "right_elbow_flex.pos": 0.5187291229229134,
-        "right_wrist_flex.pos": 0.4202450579279938,
-        "right_wrist_roll.pos": 0.09542620519627948,
-        "right_gripper.pos": 0.9422004894620161
+        "left_shoulder_pan.pos": 0.1508243307533381,
+        "left_shoulder_lift.pos": 0.203125958677816,
+        "left_elbow_flex.pos": 0.6965855470531206,
+        "left_wrist_flex.pos": 0.24100015353880677,
+        "left_wrist_roll.pos": 0.06270038174784033,
+        "left_gripper.pos": 0.10095059333614809,
+        "right_shoulder_pan.pos": 0.579869816849704,
+        "right_shoulder_lift.pos": 1.507418405933963,
+        "right_elbow_flex.pos": 1.2259449221083094,
+        "right_wrist_flex.pos": 0.43844570120517795,
+        "right_wrist_roll.pos": 0.17310531887719058,
+        "right_gripper.pos": 0.3149136546436079
       }
     }
   }
