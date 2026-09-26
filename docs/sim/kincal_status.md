@@ -33,7 +33,22 @@ photo evidence reject. Under A the arm is not self-colliding at the contacts eit
 error growing on one more commanded step. That is consistent with the claw tips pressing the table,
 but also with some other part, or a surface that isn't at the bases' height.
 
-## Next decisive measurement (needs the rig)
+## Update: side views (`~/sim_ref/sideview/`, the orange wrist cam looking at the blue claw)
+
+- **The real camera mount plate sticks out sideways**, like Menagerie's `camera_mount`. The 1080
+  session read the plate as the part that touches the table.
+- **The model can't reproduce that.** Menagerie's plate, included in the contact set, is never
+  lowest by 4–11 cm under the current mapping. Even with ±90°/180° wrist-roll offsets the mean
+  miss is ≥ 5 cm.
+- **The sim can't reproduce the side view itself either.** Rendered from the orange wrist camera at
+  the captured state, the image matches under no tested convention: range-middle, homing on
+  lift/elbow or on all three, wrist_flex −40…+40°.
+
+Conclusion: the real WOWROBO arms differ from stock SO101 in more than one way at once. Candidates are
+the calibration zero convention, part geometry and camera-mount pose. Table contacts plus a few photos
+can't separate those.
+
+## Next decisive measurement (needs the rig) — superseded, see below
 
 A side view at 2–3 confirmed contact poses (e.g. v3 rows 2, 3, 7). Two options:
 - aim the orange arm's wrist camera at the blue claw from the side;
@@ -43,6 +58,18 @@ Either shows directly what touches and how far the claw tip is from the table. W
 - if the claw tips really touch, the zero convention (B) is right, and the wrist-camera model or the
   Sep-20 data needs a second look;
 - otherwise, the contact rows get reinterpreted and A stands.
+
+## Recommended path if sim accuracy at reach matters
+
+Direct geometric calibration instead of inference:
+- **Measure the real parts:** link lengths, claw length, and the camera plate offset and angle
+  (≈10 min with calipers). Or put small AprilTags on the forearm, wrist and claw, then use the
+  overhead camera (plus one extra view) to recover each link's pose at a handful of states.
+- **Refit:** feed those into `kincal.py`; its Kin/apply_geometry/zero-convention plumbing is
+  ready.
+
+Until then the sim is accurate near the rest pose (≈1 cm) and increasingly optimistic about height
+at reach (claws 3–11 cm higher than real at mid/far reach).
 
 ## Tooling (tested, inactive until a model is chosen)
 

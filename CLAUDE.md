@@ -78,6 +78,9 @@ recordings.
 - `$PY -m halloween_bot.ctl sim-reset` puts the arms back at rest and re-places the toys.
   `--randomize` scatters the toys.
 - `ctl cam scene` gives a third-person view that only exists in sim.
+- Known accuracy limit: the twin matches the real arms near the rest pose (≈1 cm). At mid or far
+  reach the sim claws sit 3–11 cm HIGHER than the real ones. On the real rig, don't copy
+  low-approach heights straight from the sim; see docs/sim/kincal_status.md.
 
 ## Safety rules (real robot) — follow these
 
