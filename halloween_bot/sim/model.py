@@ -19,10 +19,12 @@ PARAMS_FILE = HERE / "params.json"
 BASE_Y = 0.175  # bases 35 cm apart center-to-center
 ARM_RGBA = {"left": [1.0, 0.45, 0.1, 1.0], "right": [0.25, 0.6, 0.9, 1.0]}  # orange / blue
 MENAGERIE_YELLOW = (1.0, 0.82, 0.12)
-BASKET = {"pos": (0.20, 0.10), "radius": 0.10, "height": 0.12}
+# Props sit in the center strip between the arms, clear of both resting grippers
+# (rest-pose gripper tips land at x≈0.21, y≈±0.17).
+BASKET = {"pos": (0.20, 0.0), "radius": 0.08, "height": 0.12}
 TOYS = {
-    "chick": {"pos": (0.33, -0.10), "rgba": [1.0, 0.85, 0.25, 1.0]},
-    "monkey": {"pos": (0.36, 0.00), "rgba": [0.55, 0.36, 0.22, 1.0]},
+    "chick": {"pos": (0.32, -0.09), "rgba": [1.0, 0.85, 0.25, 1.0]},
+    "monkey": {"pos": (0.33, 0.06), "rgba": [0.55, 0.36, 0.22, 1.0]},
 }
 # name: (pos, look_at, fovy_deg). overhead = the front-elevated C922 (hfov ~70° at 16:9).
 FIXED_CAMERAS = {
