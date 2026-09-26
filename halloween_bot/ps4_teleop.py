@@ -124,7 +124,7 @@ def main():
     ap.add_argument("--device", default="/dev/input/js0")
     ap.add_argument("--speed-mm", type=float, default=280.0, help="EE speed at full stick, mm/s")
     ap.add_argument("--speed", type=float, default=60.0, help="joint mode speed, units/s")
-    ap.add_argument("--lat-sign", type=int, default=-1, help="+1/-1 global lateral sign (user-validated -1; 0 re-probes)")
+    ap.add_argument("--lat-sign", type=int, default=1, help="+1/-1 global lateral sign (user-validated; 0 re-probes)")
     a = ap.parse_args()
 
     st = call("/state")
