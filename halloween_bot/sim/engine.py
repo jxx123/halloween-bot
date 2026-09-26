@@ -18,7 +18,7 @@ import mujoco
 import numpy as np
 
 from .calib import KEYS, SIDES, Calibration, clamp_norm, joint_name
-from .model import CAMERA_NAMES, CAMERA_SIZES, TOYS, build_model
+from .model import CAMERA_NAMES, CAMERA_SIZES, TOY_Z, TOYS, build_model
 
 MAX_RELATIVE_TARGET = 20.0
 CONTROL_HZ = 30
@@ -140,10 +140,10 @@ class SimEngine:
                 yaw = 0.0
                 if randomize:
                     x += rng.uniform(-0.04, 0.04)
-                    y += rng.uniform(-0.05, 0.05)
+                    y += rng.uniform(-0.03, 0.03)
                     yaw = rng.uniform(-np.pi, np.pi)
                 adr = self.model.jnt_qposadr[jid]
-                self.data.qpos[adr:adr + 7] = [x, y, 0.04, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+                self.data.qpos[adr:adr + 7] = [x, y, TOY_Z, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
             mujoco.mj_forward(self.model, self.data)
             self._resync.set()  # inside the lock: the physics loop can't step on a stale clock anchor
 

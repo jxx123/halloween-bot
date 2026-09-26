@@ -22,9 +22,9 @@ MENAGERIE_YELLOW = (1.0, 0.82, 0.12)
 # Props sit in the center strip between the arms, clear of both resting grippers
 # (rest-pose gripper tips land at x≈0.21, y≈±0.17).
 BASKET = {"pos": (0.20, 0.0), "radius": 0.08, "height": 0.12}
-TOYS = {
-    "chick": {"pos": (0.32, -0.09), "rgba": [1.0, 0.85, 0.25, 1.0]},
-    "monkey": {"pos": (0.33, 0.06), "rgba": [0.55, 0.36, 0.22, 1.0]},
+TOYS = {  # within comfortable reach of their nearest arm (~27-29 cm forward), clear of the basket
+    "chick": {"pos": (0.28, -0.11), "rgba": [1.0, 0.85, 0.25, 1.0]},
+    "monkey": {"pos": (0.29, 0.10), "rgba": [0.55, 0.36, 0.22, 1.0]},
 }
 # name: (pos, look_at, fovy_deg). overhead = the front-elevated C922 (hfov ~70° at 16:9).
 FIXED_CAMERAS = {
@@ -32,6 +32,7 @@ FIXED_CAMERAS = {
     "overhead": ((0.44, 0.0, 0.49), (0.13, 0.0, 0.0), 43.3),
     "scene": ((0.55, -0.60, 0.50), (0.12, 0.0, 0.08), 50.0),
 }
+TOY_Z = 0.031  # body centre when seated on its flat base
 CAMERA_NAMES = {"overhead": "overhead", "left_wrist": "left_wrist_cam",
                 "right_wrist": "right_wrist_cam", "scene": "scene"}
 CAMERA_SIZES = {"overhead": (720, 1280), "left_wrist": (480, 640), "right_wrist": (480, 640), "scene": (540, 960)}
@@ -84,10 +85,13 @@ def _add_props(wb):
                         pos=[r * math.cos(ang), r * math.sin(ang), h / 2], quat=_zquat(ang), rgba=white)
     for name, toy in TOYS.items():
         x, y = toy["pos"]
-        body = wb.add_body(name=name, pos=[x, y, 0.04])
+        body = wb.add_body(name=name, pos=[x, y, TOY_Z])
         body.add_freejoint(name=f"{name}_free")
-        soft = dict(condim=4, friction=[1.0, 0.01, 0.001], solref=[0.02, 1.0], rgba=toy["rgba"])
+        # plush: grippy, resists rolling out of the jaws
+        soft = dict(condim=6, friction=[1.5, 0.02, 0.002], solref=[0.01, 1.0], rgba=toy["rgba"])
         body.add_geom(type=_G.mjGEOM_ELLIPSOID, size=[0.035, 0.03, 0.03], mass=0.02, **soft)
+        # flat bottom, like a seated plush: without it the round body topples and rolls when spawned
+        body.add_geom(type=_G.mjGEOM_CYLINDER, size=[0.026, 0.004, 0], pos=[0, 0, -0.026], mass=0.005, **soft)
         body.add_geom(type=_G.mjGEOM_SPHERE, size=[0.025, 0, 0], pos=[0, 0, 0.045], mass=0.01, **soft)
 
 
