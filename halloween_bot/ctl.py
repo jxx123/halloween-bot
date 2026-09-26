@@ -58,7 +58,12 @@ def server_alive():
 
 def cmd_start(args):
     if server_alive():
-        print("server already running")
+        running_sim = bool(call("/state", timeout=5).get("sim"))
+        if running_sim != args.sim:
+            # never let "start --sim" quietly hand back the real arms (or the reverse)
+            sys.exit(f"a {'SIM' if running_sim else 'REAL-robot'} server is already running on :{PORT}; "
+                     f"stop it first (ctl stop) to start the {'sim' if args.sim else 'real robot'}")
+        print("server already running" + (" (sim)" if running_sim else ""))
         return
     Path(LOG).parent.mkdir(parents=True, exist_ok=True)
     cmd = [PYTHON, "-m", "halloween_bot.sim.server"] if args.sim else [PYTHON, SERVER]

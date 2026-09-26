@@ -11,15 +11,17 @@ What it does, per arm:
   1. GET /state; refuse if teleop is on or any joint of the arm is > APPROACH_MAX units from
      the base pose (move it closer by hand/ctl.py first).
   2. POST /move to the base pose (SURVEY, a normal smooth move over APPROACH_SECONDS).
-  3. One POST /trajectory per motor (30 Hz points, only this arm's keys, so the server keeps the
-     other arm on its last command):
+  3. One POST /trajectory per motor (30 Hz points). Every point also pins the OTHER arm at the
+     positions read in step 1: /trajectory re-anchors unspecified joints to their present
+     (sagged) reading on every call, which would ratchet the idle arm down across sequences.
        body joints: base, then steps +10 / -10 / +20 / -20 held STEP_HOLD s with a return to base
                     after each (no jump ever exceeds 20 units), then a tapered linear chirp
                     (amplitude 8, 0.3 -> 2.0 Hz over 8 s), then base;
        gripper:     30 -> 50 -> 30 -> 10 -> 30 in free air (the plan's 60 is capped to base + 20).
      Every point stays within ±MAX_DEV units of the base pose and RANGE_MARGIN inside the calibrated
      range (so the elbow's +20 step from 80 stops at 95); this is checked before anything is sent.
-  4. POST /move back to the starting pose.
+  4. POST /move back to the starting pose. After Ctrl-C this is skipped: the server finishes
+     the sequence it is playing (≤ 22 s) and then holds its last point; move the arm yourself.
 Output: {"arm", "base", "sequences": [{"name", "hz", "trace": [{t, present, cmd}, ...]}]} which
 halloween_bot.sim.sysid.load_trajectory_traces reads. Partial results are saved if a step fails.
 """
@@ -160,26 +162,41 @@ def main(argv=None) -> int:
         print("teleop is on: turn it off first", file=sys.stderr)
         return 2
     start = {k: state["positions"][k] for k in base}
+    other = {k: v for k, v in state["positions"].items() if k not in base}  # idle arm, pinned
     far = {k: round(start[k] - base[k], 1) for k in base if abs(start[k] - base[k]) > APPROACH_MAX}
     if far:
         print(f"arm is too far from the base pose {far}; move it closer first", file=sys.stderr)
         return 2
     results = []
+    interrupted = False
     try:
         print(f"moving {a.arm} arm to base pose over {APPROACH_SECONDS:g} s", flush=True)
         _call(a.server, "/move", {"targets": base, "duration": APPROACH_SECONDS}, timeout=APPROACH_SECONDS + 30)
         for s in seqs:
             print(f"playing {s['name']} ({len(s['points']) / s['hz']:.1f} s)", flush=True)
-            out = _call(a.server, "/trajectory", {"points": s["points"], "hz": s["hz"]},
+            points = [{**other, **p} for p in s["points"]]
+            out = _call(a.server, "/trajectory", {"points": points, "hz": s["hz"]},
                         timeout=len(s["points"]) / s["hz"] + 30)
             if not out.get("ok"):
                 raise RuntimeError(f"/trajectory {s['name']}: {out}")
             results.append({"name": s["name"], "hz": out.get("hz", s["hz"]), "trace": out["trace"]})
             _save(a.out, a.arm, results)
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     finally:
         _save(a.out, a.arm, results)
-        print(f"wrote {len(results)}/{len(seqs)} sequences to {a.out}; returning arm to its start pose", flush=True)
-        _call(a.server, "/move", {"targets": start, "duration": APPROACH_SECONDS}, timeout=APPROACH_SECONDS + 30)
+        print(f"wrote {len(results)}/{len(seqs)} sequences to {a.out}", flush=True)
+        if interrupted:
+            print("interrupted: the server finishes the sequence it is playing, then holds its last point. "
+                  f"NOT auto-returning; move the {a.arm} arm back yourself (ctl move).", file=sys.stderr)
+        else:
+            print(f"returning {a.arm} arm to its start pose", flush=True)
+            try:  # never let a failed return mask the original error
+                _call(a.server, "/move", {"targets": start, "duration": APPROACH_SECONDS},
+                      timeout=APPROACH_SECONDS + 30)
+            except Exception as e:
+                print(f"return move failed: {e} — move the arm back yourself", file=sys.stderr)
     return 0
 
 

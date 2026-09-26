@@ -101,3 +101,40 @@ def test_collect_dry_run_makes_no_network_calls(monkeypatch, capsys):
     assert sysid_collect.main(["--arm", "right", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "right_elbow_flex" in out and "total" in out
+
+
+def _fake_server(monkeypatch, fail_on=None):
+    from halloween_bot.sim import sysid_collect as sc
+    positions = {k: 0.0 for k in KEYS}
+    positions.update({k: v for k, v in sc.base_pose("right").items()})
+    positions["left_elbow_flex.pos"] = 93.0  # the idle arm, somewhere specific
+    calls = []
+
+    def call(server, path, payload=None, timeout=30.0):
+        calls.append((path, payload))
+        if fail_on and path == fail_on[0] and sum(p == fail_on[0] for p, _ in calls) == fail_on[1]:
+            raise fail_on[2]
+        if path == "/state":
+            return {"ok": True, "teleop": False, "positions": dict(positions)}
+        if path == "/trajectory":
+            return {"ok": True, "hz": payload["hz"], "trace": []}
+        return {"ok": True}
+
+    monkeypatch.setattr(sc, "_call", call)
+    return sc, calls
+
+
+def test_collect_pins_the_idle_arm_in_every_point(monkeypatch, tmp_path):
+    sc, calls = _fake_server(monkeypatch)
+    assert sc.main(["--arm", "right", "--out", str(tmp_path / "t.json")]) == 0
+    trajs = [p for path, p in calls if path == "/trajectory"]
+    assert trajs and all(pt["left_elbow_flex.pos"] == 93.0 for t in trajs for pt in t["points"])
+    assert calls[-1][0] == "/move"  # normal completion returns the arm
+
+
+def test_collect_interrupt_skips_auto_return(monkeypatch, tmp_path):
+    import pytest
+    sc, calls = _fake_server(monkeypatch, fail_on=("/trajectory", 2, KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        sc.main(["--arm", "right", "--out", str(tmp_path / "t.json")])
+    assert calls[-1][0] == "/trajectory"  # no /move queued behind the still-playing sequence
