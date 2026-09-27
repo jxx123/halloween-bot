@@ -85,3 +85,15 @@ These are the things that mattered, in the order they were found:
 
   A usable handover probably needs a deeper grip than a bowl floor allows (a regrasp on a stand),
   or a real teleop demo to copy.
+
+## Datasets
+
+`~/lerobot/outputs/datasets/sim_candy_v0` (repo_id `local/sim_candy_v0`, 2026-09-27):
+- **Contents:** 100 episodes (50 `pick_place`, 50 `give_human`), 46,179 frames, 21 distinct
+  instructions, 834 MB.
+- **Cost:** 11 min to record. Screening yields were 62% (pick_place) and 39% (give_human).
+- **Label:** `robot_type` is stamped `bi_so_follower`, the real rig's (`lerobot_record.py` writes
+  `robot.name`), so `aggregate_datasets()` merges it with the 1080's real candy recordings. The
+  original label is kept in `meta/sim_record.json`.
+- **Skew:** success filtering over-represents easy candy (gumball 22, wrapped candy 18, pumpkin 13 ...
+  chocolate bar 2). Rebalance per candy before training if that matters.
