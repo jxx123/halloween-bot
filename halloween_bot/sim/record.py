@@ -32,6 +32,9 @@ from .expert import Expert
 
 CAMERAS = ("overhead", "left_wrist", "right_wrist")
 FPS = 30
+# lerobot's aggregate_datasets() refuses to merge datasets whose robot_type differs: pass the real rig's
+# (--robot-type bi_so_follower) for sim data meant to be merged with real recordings
+ROBOT_TYPE = "sim_bi_so101"
 
 
 def features(image_hw: tuple[int, int]) -> dict:
@@ -44,13 +47,15 @@ def features(image_hw: tuple[int, int]) -> dict:
 
 def record(episodes: int, root, repo_id: str = "local/sim_pick_place", seed0: int = 0, task: str = DEFAULT_TASK,
            image_hw: tuple[int, int] = (480, 640), keep_failures: bool = False, max_attempts: int | None = None,
-           log=print, scene: str = "toys", tasks: tuple[str, ...] = ("pick_place",)) -> dict:
+           log=print, scene: str = "toys", tasks: tuple[str, ...] = ("pick_place",),
+           robot_type: str = ROBOT_TYPE) -> dict:
     if scene == "candy":
-        return record_candy(episodes, root, repo_id, seed0, tasks, image_hw, keep_failures, max_attempts, log)
+        return record_candy(episodes, root, repo_id, seed0, tasks, image_hw, keep_failures, max_attempts, log,
+                            robot_type)
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     ds = LeRobotDataset.create(repo_id=repo_id, fps=FPS, features=features(image_hw), root=root,
-                               robot_type="sim_bi_so101", use_videos=True, image_writer_threads=4)
+                               robot_type=robot_type, use_videos=True, image_writer_threads=4)
     eng = SimEngine()
     saved = attempts = 0
     results = []
@@ -89,7 +94,7 @@ def record(episodes: int, root, repo_id: str = "local/sim_pick_place", seed0: in
 
 
 def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=(480, 640), keep_failures=False,
-                 max_attempts: int | None = None, log=print) -> dict:
+                 max_attempts: int | None = None, log=print, robot_type: str = ROBOT_TYPE) -> dict:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     from .candy_expert import TASKS, attempt
@@ -98,7 +103,7 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
     if not tasks or any(t not in TASKS for t in tasks):
         raise ValueError(f"tasks must be from {TASKS}, got {tasks}")
     ds = LeRobotDataset.create(repo_id=repo_id, fps=FPS, features=features(image_hw), root=root,
-                               robot_type="sim_bi_so101", use_videos=True, image_writer_threads=4)
+                               robot_type=robot_type, use_videos=True, image_writer_threads=4)
     eng = SimEngine(scene="candy")
     per_task = {t: -(-episodes // len(tasks)) for t in tasks}  # ceil: episodes split across tasks
     saved, screened, results = {t: 0 for t in tasks}, {t: 0 for t in tasks}, []
@@ -149,11 +154,13 @@ def main(argv=None):
     ap.add_argument("--keep-failures", action="store_true")
     ap.add_argument("--scene", choices=("toys", "candy"), default="toys")
     ap.add_argument("--tasks", default="pick_place,give_human", help="candy scene: comma-separated, cycled")
+    ap.add_argument("--robot-type", default=ROBOT_TYPE,
+                    help="dataset robot_type; use the real rig's to merge with real recordings (aggregate_datasets checks it)")
     a = ap.parse_args(argv)
     if Path(a.root).exists():
         raise SystemExit(f"{a.root} exists; pick a new --root (LeRobot datasets are created fresh)")
     stats = record(a.episodes, a.root, a.repo_id, a.seed, a.task, keep_failures=a.keep_failures, scene=a.scene,
-                   tasks=tuple(t for t in a.tasks.split(",") if t))
+                   tasks=tuple(t for t in a.tasks.split(",") if t), robot_type=a.robot_type)
     print(json.dumps({k: v for k, v in stats.items() if k != "results"}, indent=2))
 
 
