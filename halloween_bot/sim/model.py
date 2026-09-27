@@ -95,7 +95,9 @@ def _add_props(wb):
         body.add_geom(type=_G.mjGEOM_SPHERE, size=[0.025, 0, 0], pos=[0, 0, 0.045], mass=0.01, **soft)
 
 
-def build_spec(calib: Calibration | None = None, props: bool = True) -> mujoco.MjSpec:
+def build_spec(calib: Calibration | None = None, props: bool = True, scene: str = "toys") -> mujoco.MjSpec:
+    """scene: "toys" = basket + two plush toys (what the pi0-FAST checkpoint was trained on);
+    "candy" = shallow candy bowl, assorted candy, a plate and a human hand (candy.py)."""
     calib = calib or Calibration.load()
     world = mujoco.MjSpec()
     opt = world.option
@@ -116,7 +118,11 @@ def build_spec(calib: Calibration | None = None, props: bool = True) -> mujoco.M
     wb.add_light(name="top", pos=[0.3, 0, 1.5], dir=[0, 0, -1], diffuse=[0.7, 0.7, 0.7])
     for side, y in (("left", BASE_Y), ("right", -BASE_Y)):
         _add_arm(world, side, y, calib)
-    if props:
+    if props and scene == "candy":
+        from .candy import add_candy_scene
+
+        add_candy_scene(world)
+    elif props:
         _add_props(wb)
     for name, (pos, target, fovy) in FIXED_CAMERAS.items():
         _look_at(wb.add_camera(name=name, pos=list(pos), fovy=fovy), pos, target)
@@ -189,8 +195,8 @@ def apply_geometry(model: mujoco.MjModel, geometry: dict) -> None:
 
 
 def build_model(params: dict | None = None, calib: Calibration | None = None, props: bool = True,
-                geometry: dict | None = None) -> mujoco.MjModel:
-    model = build_spec(calib, props).compile()
+                geometry: dict | None = None, scene: str = "toys") -> mujoco.MjModel:
+    model = build_spec(calib, props, scene).compile()
     apply_params(model, load_params() if params is None else params)
     apply_geometry(model, load_geometry() if geometry is None else geometry)
     return model

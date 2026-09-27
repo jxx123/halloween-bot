@@ -78,6 +78,9 @@ recordings.
 - `$PY -m halloween_bot.ctl sim-reset` puts the arms back at rest and re-places the toys.
   `--randomize` scatters the toys.
 - `ctl cam scene` gives a third-person view that only exists in sim.
+- `ctl start --sim --scene candy` (or `SIM_SCENE=candy ./run_sim.sh`) swaps the toys and basket for a
+  shallow candy bowl, a plate and a person's hand. π₀-FAST was trained on the toys scene only.
+  See docs/sim/candy_scene.md.
 - Accuracy: calibrated 2026-09-27 against ruler heights at two reach poses; elbow, wrist and claw
   tip land within ≈4 mm of the real ones. Per-arm offsets live in `halloween_bot/sim/geometry.json`;
   the orange arm's wrist sits ~11° higher than the blue one's. Still approach the real table slowly;

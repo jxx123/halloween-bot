@@ -201,9 +201,13 @@ def main(argv=None):
     ap.add_argument("--policy-server", default="127.0.0.1:8081",
                     help="lerobot policy_server for π (:8080 belongs to the 1080's real-robot client)")
     ap.add_argument("--no-policy", action="store_true")
+    ap.add_argument("--scene", choices=("toys", "candy"), default="toys",
+                    help="toys = basket + plush toys (what pi0-FAST knows); candy = candy bowl, plate, a person's hand")
     args = ap.parse_args(argv)
 
-    engine = SimEngine()
+    engine = SimEngine(scene=args.scene)
+    if args.scene == "candy":
+        engine.reset(randomize=True)
     engine.start()
     runner = None
     if not args.no_policy:

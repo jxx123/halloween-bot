@@ -15,7 +15,7 @@ if ! listening 8081; then
       --host=127.0.0.1 --port=8081 >>"$LOG/policy_server_sim.log" 2>&1 &)
   echo "policy server starting on :8081 (the first π run loads the model, ~50 s)"
 fi
-.venv/bin/python -m halloween_bot.ctl start --sim
+.venv/bin/python -m halloween_bot.ctl start --sim --scene "${SIM_SCENE:-toys}"  # SIM_SCENE=candy ./run_sim.sh
 if ! listening 8500; then
   setsid .venv/bin/python -m halloween_bot.app.webapp >>"$LOG/webapp.log" 2>&1 &
   sleep 2

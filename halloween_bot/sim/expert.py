@@ -26,6 +26,8 @@ GRASP_GAP = OPEN  # jaw midpoint of the OPEN gripper = grasp point: both jaws cl
 
 
 class Expert:
+    grasp_gap = GRASP_GAP  # gripper opening whose jaw midpoint is the grasp point
+
     def __init__(self, engine: SimEngine, hz: float = CONTROL_HZ):
         self.eng, self.m, self.hz = engine, engine.model, hz
         self.ik_data = mujoco.MjData(self.m)
@@ -38,7 +40,7 @@ class Expert:
         d = self.ik_data
         d.qpos[:] = self.eng.data.qpos
         k = f"{side}_gripper.pos"
-        d.qpos[self._qadr[k]] = self.eng.calib.to_rad(k, GRASP_GAP)
+        d.qpos[self._qadr[k]] = self.eng.calib.to_rad(k, self.grasp_gap)
         mujoco.mj_kinematics(self.m, d)
         mid = 0.5 * (d.geom_xpos[self.m.geom(f"{side}_fixed_jaw_sph_tip1").id]
                      + d.geom_xpos[self.m.geom(f"{side}_moving_jaw_sph_tip1").id])
@@ -65,8 +67,10 @@ class Expert:
         mujoco.mj_kinematics(self.m, d)
         return self._tip_axis(d, side)
 
-    def ik(self, side: str, target: np.ndarray, seed: dict | None = None) -> dict:
-        """Normalized pan/lift/elbow/wrist_flex putting the claw tip at target, claws as close to down as possible."""
+    def ik(self, side: str, target: np.ndarray, seed: dict | None = None, axis=(0.0, 0.0, -1.0),
+           axis_weight: float = DOWN_WEIGHT, roll: float | None = None) -> dict:
+        """Normalized pan/lift/elbow/wrist_flex putting the claw tip at target, the claws as close to `axis`
+        (default: straight down) as possible. roll: normalized wrist_roll to solve with (default: current)."""
         keys = [f"{side}_{j}.pos" for j in ARM_JOINTS]
         cal, d = self.eng.calib, self.ik_data
         seed = seed or self.eng.read_positions()
@@ -77,13 +81,16 @@ class Expert:
         hi = np.array([min(self.m.jnt_range[self.m.joint(joint_name(k)).id][1], c[1]) for k, c in zip(keys, cmd)])
         adr = [self._qadr[k] for k in keys]
         base = self.eng.data.qpos.copy()
+        if roll is not None:
+            base[self._qadr[f"{side}_wrist_roll.pos"]] = cal.to_rad(f"{side}_wrist_roll.pos", roll)
+        want = np.asarray(axis, float) / np.linalg.norm(axis)
 
         def res(x):
             d.qpos[:] = base
             d.qpos[adr] = x
             mujoco.mj_kinematics(self.m, d)
             tip, axis = self._tip_axis(d, side)
-            return np.concatenate([tip - target, DOWN_WEIGHT * (axis - np.array([0.0, 0.0, -1.0]))])
+            return np.concatenate([tip - target, axis_weight * (axis - want)])
 
         best = None
         for start in (x0, np.clip(x0 + np.array([0, 0.4, -0.4, 0.2]), lo, hi)):
