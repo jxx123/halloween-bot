@@ -53,6 +53,22 @@ the recorded contact, and read the claw-tip height with a ruler. If it reads ~13
 were not claw-on-tabletop at z = 0 (something on the table, or the detector firing on a load change).
 If it reads ~0–2 cm, the model is wrong at descended poses.
 
+**The contact photos already point to the first answer** (`docs/sim/contact_overlay.jpg`):
+- **Nothing on the table.** The lit frames of all 9 contacts show nothing under the claws.
+- **The claws are where the sim puts them.** At the three widest-gap rows (7, 3, 9), the current
+  model's outline at the photo state lies on the real claws. That puts the tips 13, 12 and 5 cm up.
+  The homing-zero outline sits visibly lower and doesn't match.
+- **The camera is independently validated.** It was checked at P0, a pose outside the fit, so this
+  isn't the camera absorbing a model error.
+
+The 1080 confirms its detector can't tell a claw touch from the elbow losing to gravity. Every
+contact fired on elbow tracking error while the descent drove the elbow into a growing gravity
+moment. So the contact set is best read as "the elbow saturated here", not "the claws reached the
+table". **Working conclusion: the current model is right at reach too, and the "3–11 cm high"
+warning comes from false contacts.** The CLAUDE.md warning stays until the rig check (ruler or a
+camera frame at row 7, stopped short) confirms it: relaxing a safety note on photo evidence alone is
+premature.
+
 ## Evidence and what it says
 
 | Evidence | Current mapping (A) | "homing" zero for lift/elbow + fitted residuals (B) |
