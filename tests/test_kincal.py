@@ -166,3 +166,23 @@ def test_fit_measured_recovers_offsets(tmp_path):
     for side in ("left", "right"):
         for motor, deg in truth["joint_offsets_deg"][side].items():
             assert geom["joint_offsets_deg"][side][motor] == pytest.approx(deg, abs=1.0), (side, motor)
+
+
+def test_shipped_geometry_matches_the_ruler_heights():
+    """geometry.json reproduces Jinyu's 2026-09-27 ruler heights (mm above the tabletop) at the reached states."""
+    from halloween_bot.sim.kincal import Kin
+    from halloween_bot.sim.model import load_geometry
+    p0 = {"left_shoulder_pan.pos": -1.19, "left_shoulder_lift.pos": 0.26, "left_elbow_flex.pos": 3.69,
+          "left_wrist_flex.pos": 1.05, "left_wrist_roll.pos": -0.26, "right_shoulder_pan.pos": -1.01,
+          "right_shoulder_lift.pos": 0.44, "right_elbow_flex.pos": 3.78, "right_wrist_flex.pos": 1.14,
+          "right_wrist_roll.pos": -0.31}
+    p1 = {"left_shoulder_pan.pos": -0.66, "left_shoulder_lift.pos": 1.23, "left_elbow_flex.pos": 20.22,
+          "left_wrist_flex.pos": 1.14, "left_wrist_roll.pos": -0.26, "right_shoulder_pan.pos": -0.57,
+          "right_shoulder_lift.pos": 1.05, "right_elbow_flex.pos": 20.22, "right_wrist_flex.pos": 1.14,
+          "right_wrist_roll.pos": -0.4}
+    measured = [(p0, "right", (231, 238, 241)), (p0, "left", (231, 239, 270)),
+                (p1, "right", (230, 198, 150)), (p1, "left", (230, 196, 180))]
+    kin = Kin({"joint_offsets_deg": load_geometry()["joint_offsets_deg"]})
+    for state, side, mm in measured:
+        got = [1000 * kin.point_height(state, side, p) for p in ("elbow_flex", "wrist_flex", "tip")]
+        assert np.abs(np.array(got) - mm).max() < 5.0, (side, got, mm)

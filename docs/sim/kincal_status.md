@@ -1,9 +1,37 @@
-# Sim ↔ real kinematic calibration: status (2026-09-26)
+# Sim ↔ real kinematic calibration: status (2026-09-27)
 
 ## What's active in the sim
 
-- **Joint mapping:** unchanged. Every joint is zeroed at the middle of its calibrated range (lerobot DEGREES
-  convention), with no offsets.
+- **Joint mapping:** the range-middle zero plus small per-arm offsets, fit to ruler heights (next
+  section). Before that (2026-09-26 and earlier): the range-middle zero with no offsets.
+
+## Ruler calibration (2026-09-27)
+
+Jinyu measured three heights above the tabletop at P0 (all joints 0) and P1 (elbow 20), on both arms
+(`~/sim_ref/measurements.json`): the elbow axis, the wrist-flex axis, and the fixed-jaw tip. At the
+states the arms actually reached (they sag a few units), the unoffset model was:
+- **right arm:** wrist axis 12–14 mm low, tip 12–19 mm low;
+- **left arm:** tip 43–46 mm low (Jinyu saw the orange wrist pitched up at wrist_flex 0).
+
+`kincal measured` with stock link lengths fits all 12 heights within 3.5 mm:
+
+| offset (deg) | shoulder_lift | elbow_flex | wrist_flex |
+|---|---|---|---|
+| right | −3.36 | −1.47 | +3.81 |
+| left | −3.41 | −1.30 | −7.08 |
+
+At P0/P1 the upper arm is near vertical, so the lift/elbow split is weakly determined; the heights
+pin their sum (≈ −4.8°). Checks:
+- Blue-arm silhouette IoU on 15 lit photos is unchanged (0.613 → 0.611): offsets this small are below
+  what the photos resolve.
+- The orange arm at rest prefers a *lower* claw in the photos (IoU 0.40 → 0.35), but the orange overlay is
+  unreliable: IoU is only ~0.4, the camera was fit on the blue arm, and the left base spacing (card
+  A6) was never measured. The ruler wins.
+- The expert's IK is now bounded by the ±100 command range. With the left wrist offset, the model's
+  joint range extends past what a command can reach.
+
+The ruler also settles the earlier contact question: at reach the unoffset sim was 1–2 cm *low*, not
+3–11 cm high. The "contacts" were elbow saturation (below).
 - **Overhead camera:** re-fit (`halloween_bot/sim/geometry.json`). The C922 was bumped during the rig
   visit. Fitting the camera alone to the lit overlay photos raises the blue-arm silhouette IoU from
   0.345 to 0.643 (Δpos ≈ 3–4 cm, pitch +7°).

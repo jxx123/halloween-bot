@@ -71,8 +71,10 @@ class Expert:
         cal, d = self.eng.calib, self.ik_data
         seed = seed or self.eng.read_positions()
         x0 = np.array([cal.to_rad(k, seed[k]) for k in keys])
-        lo = np.array([self.m.jnt_range[self.m.joint(joint_name(k)).id][0] for k in keys])
-        hi = np.array([self.m.jnt_range[self.m.joint(joint_name(k)).id][1] for k in keys])
+        # commands clamp to ±100, which (with calibration offsets) can be narrower than the model's joint range
+        cmd = [sorted((cal.to_rad(k, -100.0), cal.to_rad(k, 100.0))) for k in keys]
+        lo = np.array([max(self.m.jnt_range[self.m.joint(joint_name(k)).id][0], c[0]) for k, c in zip(keys, cmd)])
+        hi = np.array([min(self.m.jnt_range[self.m.joint(joint_name(k)).id][1], c[1]) for k, c in zip(keys, cmd)])
         adr = [self._qadr[k] for k in keys]
         base = self.eng.data.qpos.copy()
 
