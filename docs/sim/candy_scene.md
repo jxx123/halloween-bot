@@ -3,6 +3,8 @@
 `SimEngine(scene="candy")`, `ctl start --sim --scene candy` or `SIM_SCENE=candy ./run_sim.sh`. The default
 scene is still the toys-and-basket one that the π₀-FAST checkpoint was trained on.
 
+![candy scene](candy_scene.jpg)
+
 ## What's in it
 
 - **Bowl:** wide and shallow, purple, 3.7 cm deep, 9 cm floor radius. It sits between the arms at
