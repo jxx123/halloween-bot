@@ -36,6 +36,23 @@ link-length error. Remaining candidates:
 A P1 ruler reading (elbow 20, the descent direction) and the plate/lens pose (card section C) would
 separate them. Until then keep the CLAUDE.md warning: don't copy low-approach heights from the sim.
 
+Two of those were then checked against the 9 confirmed contacts (right arm, current mapping):
+- **A rigid part on the gripper doesn't fit.** At the contacts the claw axis is 40–62° from vertical, and
+  "down" points mostly along the claws, not sideways. The single gripper-frame point that best
+  touches at all 9 contacts sits 19 cm from the gripper origin, near no real part. It still misses
+  by ±3 cm, sinks the rest pose 4.5 cm into the table, and cuts through free descent paths by 5 cm.
+  A side plate would add at most ~2 cm of downward reach, not 3–11 cm.
+- **A joint-scale error doesn't fit.** The scale comes from the encoder range (360°/4096 per tick,
+  ≈1°/unit). Reaching 11 cm at a 25 cm lever needs ~25° at n ≈ −55, i.e. a ~45% scale error, and
+  the rest pose (n = −86 / 95) would then be off by far more than the observed ≈1 cm.
+
+So every direct view of the arm agrees with the current model: rest, the lit overlay photos, the
+wrist-camera directions and P0. The contact rows are the outlier. The most decisive rig check is to
+go back to the contact pose where the sim shows the most clearance (v3 row 7, 11 cm), stopping a few cm above
+the recorded contact, and read the claw-tip height with a ruler. If it reads ~13 cm, the contacts
+were not claw-on-tabletop at z = 0 (something on the table, or the detector firing on a load change).
+If it reads ~0–2 cm, the model is wrong at descended poses.
+
 ## Evidence and what it says
 
 | Evidence | Current mapping (A) | "homing" zero for lift/elbow + fitted residuals (B) |
