@@ -8,6 +8,34 @@
   visit. Fitting the camera alone to the lit overlay photos raises the blue-arm silhouette IoU from
   0.345 to 0.643 (Δpos ≈ 3–4 cm, pitch +7°).
 
+## Update: P0 frames settle the zero convention (2026-09-26, late)
+
+The 1080 commanded measurement pose **P0** (all body joints 0, gripper 5) on both arms. The arms reached
+lift 3.9 / 0.4 and elbow 3.7 / 3.7 (left / right). Frames and state are in `~/sim_ref/p0/`. No ruler
+heights were taken.
+
+- **The current mapping (A) is right; the "homing" zero (B) is rejected.** Both real wrist cameras look
+  forward and slightly up, at a monitor across the room, with the claws pointing forward. A predicts
+  that: forearm about level, claw tips 20–22 cm up. B predicts the claws pointing down at the table
+  from 6–10 cm, which is clearly not what the cameras see. Side by side: `docs/sim/p0_compare.jpg`.
+- **At full extension the right arm matches the sim closely.** The sim's blue-arm outline, rendered at
+  the reached state with the re-fit camera, lies on the real arm within a few pixels: upper arm,
+  forearm, wrist and claws (`docs/sim/p0_overlay.jpg`). So link lengths and lift/elbow offsets are
+  not off by centimetres at this pose.
+- **The one visible mismatch is the wrist-camera plate.** The real board is a flat plate sticking out
+  on the arm's outer side (image-left), with the lens under it. Menagerie's mount sticks out
+  diagonally on the inner side.
+
+What this means for the table contacts: the fit that explained them (B) is ruled out, and the lift/elbow
+chain matches at full extension. So the 3–11 cm gap at the contacts is not a zero-convention or
+link-length error. Remaining candidates:
+- what actually touches (the "what touches" question below; the real plate/lens differs from the model);
+- a wrist_flex offset that only shows when the wrist is flexed (P0 has wrist_flex ≈ 0);
+- compliance under table load.
+
+A P1 ruler reading (elbow 20, the descent direction) and the plate/lens pose (card section C) would
+separate them. Until then keep the CLAUDE.md warning: don't copy low-approach heights from the sim.
+
 ## Evidence and what it says
 
 | Evidence | Current mapping (A) | "homing" zero for lift/elbow + fitted residuals (B) |
