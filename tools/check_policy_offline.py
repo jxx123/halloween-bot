@@ -20,19 +20,23 @@ def main(argv=None):
     ap.add_argument("--offsets", default="0,60,150")
     ap.add_argument("--arm", choices=("left", "right"), default="right")
     ap.add_argument("--mem-fraction", type=float, default=0.42)
+    ap.add_argument("--device", default="cuda", help="cpu works (slow) when training holds the GPU")
     a = ap.parse_args(argv)
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     import numpy as np
     import torch
 
-    torch.cuda.set_per_process_memory_fraction(a.mem_fraction)
+    if a.device == "cuda":
+        torch.cuda.set_per_process_memory_fraction(a.mem_fraction)
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.factory import make_pre_post_processors
     from lerobot.policies.pi0_fast.modeling_pi0_fast import PI0FastPolicy
 
     ckpt = os.path.expanduser(a.checkpoint)
-    policy = PI0FastPolicy.from_pretrained(ckpt).to("cuda").eval()
-    pre, post = make_pre_post_processors(policy.config, pretrained_path=ckpt)
+    policy = PI0FastPolicy.from_pretrained(ckpt).to(a.device).eval()
+    policy.config.device = a.device
+    pre, post = make_pre_post_processors(policy.config, pretrained_path=ckpt,
+                                         preprocessor_overrides={"device_processor": {"device": a.device}})
     ds = LeRobotDataset(a.repo_id, root=os.path.expanduser(a.root))
     cols = slice(0, 6) if a.arm == "left" else slice(6, 12)
     errs = []

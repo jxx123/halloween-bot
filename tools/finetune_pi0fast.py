@@ -54,14 +54,17 @@ def local_base(dest: str) -> str:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--repo-id", required=True)
-    ap.add_argument("--dataset-root", required=True)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--repo-id")
+    ap.add_argument("--dataset-root")
+    ap.add_argument("--out")
+    ap.add_argument("--resume", default=None, help="a run's checkpoint dir (e.g. <out>/checkpoints/last) to continue")
+    ap.add_argument("--episodes", default=None, help='train on these episodes only, e.g. "[2]" (overfit test)')
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--lr", type=float, default=1e-4, help="peak LR (LoRA wants more than the full-FT 2.5e-5)")
     ap.add_argument("--warmup", type=int, default=100)
     ap.add_argument("--rank", type=int, default=16)
+    ap.add_argument("--lora-alpha", type=int, default=32, help="LoRA scale = alpha/rank; peft's default 8 at r16 halves updates")
     ap.add_argument("--save-freq", type=int, default=1000)
     ap.add_argument("--mem-fraction", type=float, default=0.42, help="of the GPU; :8081 holds ~16 GB of 32")
     ap.add_argument("--num-workers", type=int, default=4)
@@ -75,6 +78,12 @@ def main(argv=None):
     torch.cuda.set_per_process_memory_fraction(a.mem_fraction)
     from lerobot.scripts.lerobot_train import main as train_main
 
+    if a.resume:  # everything else comes from the run's saved train_config.json
+        sys.argv = ["lerobot-train", "--resume=true",
+                    f"--config_path={os.path.expanduser(a.resume)}/pretrained_model/train_config.json"]
+        return train_main()
+    if not (a.repo_id and a.dataset_root and a.out):
+        ap.error("--repo-id, --dataset-root and --out are required (unless --resume)")
     base = local_base(a.base_dir)
 
     sys.argv = ["lerobot-train",
@@ -83,11 +92,13 @@ def main(argv=None):
                 "--policy.dtype=bfloat16", "--policy.gradient_checkpointing=true", "--policy.push_to_hub=false",
                 f"--policy.optimizer_lr={a.lr}", f"--policy.scheduler_warmup_steps={a.warmup}",
                 f"--policy.scheduler_decay_steps={a.steps}", f"--policy.scheduler_decay_lr={a.lr / 10}",
-                "--peft.method_type=LORA", f"--peft.r={a.rank}", f"--peft.target_modules={LORA_TARGETS}",
+                "--peft.method_type=LORA", f"--peft.r={a.rank}", f"--peft.lora_alpha={a.lora_alpha}", f"--peft.target_modules={LORA_TARGETS}",
                 "--peft.full_training_modules=[]",
                 f"--batch_size={a.batch_size}", f"--steps={a.steps}", f"--save_freq={a.save_freq}",
                 f"--num_workers={a.num_workers}", "--log_freq=25", "--wandb.enable=false",
                 f"--output_dir={os.path.expanduser(a.out)}"]
+    if a.episodes:
+        sys.argv.append(f"--dataset.episodes={a.episodes}")
     train_main()
 
 
