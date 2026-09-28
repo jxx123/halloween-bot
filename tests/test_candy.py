@@ -102,3 +102,24 @@ def test_record_candy_writes_a_loadable_multitask_dataset(tmp_path):
     assert any(t.startswith("Pick up the") for t in tasks) and any(t.startswith("Give the") for t in tasks)
     meta = json.loads((root / "meta" / "sim_record.json").read_text())
     assert {r["task"] for r in meta["results"]} == {"pick_place", "give_human"}
+
+
+def test_eval_world_brings_the_hand_in_once_the_candy_is_lifted(eng):
+    from halloween_bot.sim.eval_policy import World
+
+    eng.reset(randomize=True, seed=7)
+    ex = CandyExpert(eng)
+    ep = ex.setup("give_human", np.random.default_rng(7))
+    world = World(eng, "give_human", ep)
+    m, d = eng.model, eng.data
+    for _ in range(5):
+        world.tick()
+    assert world.hand_path is None  # candy still in the bowl: the person waits
+    adr = m.joint(f"{ep['candy']}_free").qposadr[0]
+    d.qpos[adr + 2] = 0.12  # the robot has lifted it
+    mujoco.mj_forward(m, d)
+    for _ in range(60):
+        world.tick()
+    target = d.mocap_pos[int(m.body_mocapid[m.body("hand_target").id])]
+    assert np.linalg.norm(target - ep["hand"]) < 1e-6  # reached in all the way
+    assert not world.success()
