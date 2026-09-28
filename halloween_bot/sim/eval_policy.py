@@ -58,53 +58,60 @@ class World:
         return C.in_hand(m, d, name) if self.task == "give_human" else C.on_plate(m, d, name)
 
 
-def run_episode(eng: SimEngine, runner_kw: dict, task: str, seed: int, seconds: float, video: Path | None,
-                log=print) -> dict | None:
-    rng = np.random.default_rng(seed)
-    eng.pause()
-    eng.reset(randomize=True, seed=seed)
-    expert = CandyExpert(eng)
-    try:
-        ep = expert.setup(task, rng)  # settles the candy and places the plate / parks the hand
-    except NoCandy:
-        eng.resume()
-        return None
-    world = World(eng, task, ep)
-    writer = None
-    if video is not None:
-        video.parent.mkdir(parents=True, exist_ok=True)
-        writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 10, (640, 480))  # one frame per observation
+class Episodes:
+    """One PolicyRunner for the whole evaluation (it instructs the server once, so the model loads once);
+    the observation hook drives whichever episode is current."""
 
-    def observe():
-        world.tick()
-        obs = policy_observation(eng)
-        if writer is not None:
-            writer.write(cv2.cvtColor(obs[PI0FAST_CAMERAS["overhead"]], cv2.COLOR_RGB2BGR))
+    def __init__(self, eng: SimEngine, runner_kw: dict):
+        self.eng, self.world, self.writer = eng, None, None
+        self.runner = PolicyRunner(self._observe, eng.send_action, KEYS, policy_features(), pause=eng.pause,
+                                   resume=eng.resume, **runner_kw)
+
+    def _observe(self):
+        if self.world is not None:
+            self.world.tick()
+        obs = policy_observation(self.eng)
+        if self.writer is not None:
+            self.writer.write(cv2.cvtColor(obs[PI0FAST_CAMERAS["overhead"]], cv2.COLOR_RGB2BGR))
         return obs
 
-    runner = PolicyRunner(observe, eng.send_action, KEYS, policy_features(), pause=eng.pause, resume=eng.resume,
-                          **runner_kw)
-    eng.resume()
-    t0 = time.time()
-    runner.start(ep["instruction"], seconds=seconds, lockstep=True)
-    ok_for = 0.0
-    while runner.running:
-        time.sleep(0.25)
-        if world.success():
-            ok_for += 0.25
-            if ok_for >= 2.0:  # held the success state for 2 s: done
-                runner.stop()
-        else:
-            ok_for = 0.0
-    status = runner.status()
-    if writer is not None:
-        writer.release()
-    res = {"seed": seed, "task": task, "candy": ep["candy"], "instruction": ep["instruction"],
-           "success": bool(world.success()), "phase": status.get("phase"), "error": status.get("error"),
-           "chunks": status.get("chunks"), "wall_s": round(time.time() - t0, 1),
-           "candy_end": [round(float(v), 3) for v in eng.data.xpos[eng.model.body(ep["candy"]).id]]}
-    log(json.dumps(res))
-    return res
+    def run(self, task: str, seed: int, seconds: float, video: Path | None, log=print) -> dict | None:
+        eng = self.eng
+        rng = np.random.default_rng(seed)
+        eng.pause()
+        eng.reset(randomize=True, seed=seed)
+        try:
+            ep = CandyExpert(eng).setup(task, rng)  # settles the candy, places the plate / parks the hand
+        except NoCandy:
+            eng.resume()
+            return None
+        self.world = World(eng, task, ep)
+        if video is not None:
+            video.parent.mkdir(parents=True, exist_ok=True)
+            self.writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 10, (640, 480))  # per observation
+        eng.resume()
+        t0 = time.time()
+        self.runner.start(ep["instruction"], seconds=seconds, lockstep=True)
+        ok_for = 0.0
+        while self.runner.running:
+            time.sleep(0.25)
+            if self.world.success():
+                ok_for += 0.25
+                if ok_for >= 2.0:  # held the success state for 2 s: done
+                    self.runner.stop()
+            else:
+                ok_for = 0.0
+        status = self.runner.status()
+        if self.writer is not None:
+            self.writer.release()
+            self.writer = None
+        res = {"seed": seed, "task": task, "candy": ep["candy"], "instruction": ep["instruction"],
+               "success": bool(self.world.success()), "phase": status.get("phase"), "error": status.get("error"),
+               "chunks": status.get("chunks"), "wall_s": round(time.time() - t0, 1),
+               "candy_end": [round(float(v), 3) for v in eng.data.xpos[eng.model.body(ep["candy"]).id]]}
+        self.world = None
+        log(json.dumps(res))
+        return res
 
 
 def main(argv=None):
@@ -125,6 +132,8 @@ def main(argv=None):
     runner_kw = dict(server_address=a.policy_server, checkpoint=os.path.expanduser(a.checkpoint),
                      load_timeout=300.0, blocked_by=lambda: other_policy_clients(port))  # yield to the 1080
     video_dir = Path(os.path.expanduser(a.video_dir)) if a.video_dir else None
+    episodes = Episodes(eng, runner_kw)
+    log = lambda msg: print(msg, flush=True)
     results = []
     try:
         for i, task in enumerate(a.tasks.split(",")):
@@ -132,7 +141,7 @@ def main(argv=None):
             while done < a.episodes:
                 seed += 1
                 vid = video_dir / f"{task}_{seed}.mp4" if video_dir else None
-                res = run_episode(eng, runner_kw, task, seed, a.seconds, vid)
+                res = episodes.run(task, seed, a.seconds, vid, log)
                 if res is not None:
                     results.append(res)
                     done += 1
