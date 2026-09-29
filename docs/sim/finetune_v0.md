@@ -26,10 +26,16 @@ pick_place and give_human) and evaluate it closed-loop in the twin.
 | alpha 8, LR 1e-4 | 4k | 7.7 → 2.6 | – | 0/5 (never moves) | – |
 | alpha 8, LR 1e-4 | 5.7k (stopped) | 2.33 | 29.0 | – | – |
 | **alpha 32, LR 2e-4** | **20k** (~1.7 epochs) | **7.7 → 0.95** | **10.9** (mid-reach 1–2) | **0/10** | **0/10** |
+| **π₀.₅ (lerobot/pi05_base)**, alpha 32, LR 2e-4 | 20k | 0.16 → 0.034 (flow MSE) | 9.3 (start of reach 9.7 vs 34.6) | 0/10 | 0/10 |
 
 With the 20k model the arm moves in 18/20 sim episodes. It reaches into the bowl toward the named
 candy, misses the grasp, and returns to rest. It has learned the shape of the task but not
 millimetre grasp precision.
+
+With π₀.₅ the arms are much more active. It often reaches with one arm, retracts, then tries the other: the
+which-arm ambiguity shows up as sequential attempts instead of FAST's averaged no-motion. It still misses
+the grasp. π₀.₅ needs no FAST tokenizer or shims: it trains from `lerobot/pi05_base` and is served by stock
+`~/pi-serve` (`tools/finetune_pi.py --policy pi05`).
 
 ## Findings
 
@@ -44,6 +50,9 @@ millimetre grasp precision.
   per-tick ±20 clamp and the joint limits contain it, in sim and on the real server.
 
 ## Next
+
+- **In progress (2026-09-29):** π₀.₅ on `sim_candy_v1`. 1000 balanced episodes (≤73 per candy per task),
+  464k frames, 40k steps.
 
 - **More sim data:** ~1000 episodes (~2 h to record; the screening makes yield irrelevant), then a
   longer run. Precise grasping from 100 demos is optimistic.
