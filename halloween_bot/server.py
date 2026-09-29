@@ -39,6 +39,8 @@ from halloween_bot.policy_runner import (
     PI0FAST_IMAGE_HW,
     PolicyRunner,
     fit_image,
+    letterbox,
+    POLICY_IMAGE_SIZE,
     handle_http as policy_http,
 )
 
@@ -218,7 +220,9 @@ def set_teleop(enable: bool) -> dict:
 def policy_obs() -> dict:
     # Camera reads stay OUTSIDE the robot lock: a wedged C922 (2 s timeout x3) must not
     # stall policy_send / /move. async_read only copies the camera thread's latest frame.
-    frames = {PI0FAST_CAMERAS[n]: fit_image(cams()[n].async_read(timeout_ms=2000)) for n in PI0FAST_CAMERAS}
+    # letterbox (aspect-preserving pad to 224x224) BEFORE sending: lerobot's async server would
+    # otherwise squash 4:3 -> 1:1, feeding the policy images it never trained on.
+    frames = {PI0FAST_CAMERAS[n]: letterbox(fit_image(cams()[n].async_read(timeout_ms=2000))) for n in PI0FAST_CAMERAS}
     with lock:
         obs = read_positions()
     return {**obs, **frames}
@@ -374,7 +378,7 @@ def main():
         policy_send,
         list(robot.action_features),
         {**{k: float for k in robot.action_features},
-         **{f: (*PI0FAST_IMAGE_HW, 3) for f in PI0FAST_CAMERAS.values()}},
+         **{f: (POLICY_IMAGE_SIZE, POLICY_IMAGE_SIZE, 3) for f in PI0FAST_CAMERAS.values()}},
         server_address="127.0.0.1:8080",  # serve_5090.sh tunnel to the OMEN policy server
         blocked_by=sim_holds_policy_server,
     )
