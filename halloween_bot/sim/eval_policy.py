@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Evaluate a pi0-FAST checkpoint on the candy tasks in the MuJoCo twin.
+"""Evaluate a pi0-FAST / pi05 checkpoint on the candy tasks in the MuJoCo twin.
 
 Each episode is set up exactly like a scripted demo (CandyExpert.setup: seeded bowl, candy, plate/hand,
 instruction), then the policy runs through PolicyRunner (lockstep: physics pauses while it infers) and
@@ -22,7 +22,10 @@ import math
 import time
 from pathlib import Path
 
+import threading
+
 import cv2
+import mujoco
 import numpy as np
 
 from ..policy_runner import PI0FAST_CAMERAS, PolicyRunner
@@ -30,6 +33,7 @@ from . import candy as C
 from .calib import KEYS
 from .candy_expert import CandyExpert, NoCandy
 from .engine import SimEngine
+from .model import CAMERA_NAMES
 from .server import other_policy_clients, policy_features, policy_observation
 
 
@@ -62,16 +66,33 @@ class Episodes:
     """One PolicyRunner for the whole evaluation (it instructs the server once, so the model loads once);
     the observation hook drives whichever episode is current."""
 
-    def __init__(self, eng: SimEngine, runner_kw: dict):
+    def __init__(self, eng: SimEngine, runner_kw: dict, full_video: bool = False):
         self.eng, self.world, self.writer = eng, None, None
-        self.runner = PolicyRunner(self._observe, eng.send_action, KEYS, policy_features(), pause=eng.pause,
+        self.full_video, self._tls, self.caption = full_video, threading.local(), ""
+        self.runner = PolicyRunner(self._observe, self._send, KEYS, policy_features(), pause=eng.pause,
                                    resume=eng.resume, **runner_kw)
+
+    def _send(self, action: dict):
+        out = self.eng.send_action(action)
+        if self.full_video and self.writer is not None:  # every control step: a real-time 30 fps video
+            tl = self._tls
+            if not hasattr(tl, "r"):  # EGL contexts are per thread: one renderer set per runner thread
+                tl.r = {c: mujoco.Renderer(self.eng.model, 360, 480) for c in ("overhead", "scene")}
+            with self.eng.lock:
+                imgs = []
+                for cam, r in tl.r.items():
+                    r.update_scene(self.eng.data, CAMERA_NAMES[cam])
+                    imgs.append(r.render())
+            frame = cv2.cvtColor(np.hstack(imgs), cv2.COLOR_RGB2BGR)
+            cv2.putText(frame, self.caption, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            self.writer.write(frame)
+        return out
 
     def _observe(self):
         if self.world is not None:
             self.world.tick()
         obs = policy_observation(self.eng)
-        if self.writer is not None:
+        if self.writer is not None and not self.full_video:
             self.writer.write(cv2.cvtColor(obs[PI0FAST_CAMERAS["overhead"]], cv2.COLOR_RGB2BGR))
         return obs
 
@@ -88,7 +109,9 @@ class Episodes:
         self.world = World(eng, task, ep)
         if video is not None:
             video.parent.mkdir(parents=True, exist_ok=True)
-            self.writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 10, (640, 480))  # per observation
+            size, fps = ((960, 360), 30) if self.full_video else ((640, 480), 10)  # per control step / per observation
+            self.writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
+            self.caption = f"{ep['instruction']}  (seed {seed})"
         eng.resume()
         t0 = time.time()
         self.runner.start(ep["instruction"], seconds=seconds, lockstep=True)
@@ -118,25 +141,38 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--policy-server", default="127.0.0.1:8082")
     ap.add_argument("--checkpoint", required=True)
+    ap.add_argument("--policy-type", default=None, help="pi0_fast / pi05 (default: the checkpoint's config.json)")
     ap.add_argument("--tasks", default="pick_place,give_human")
     ap.add_argument("--episodes", type=int, default=10, help="per task")
     ap.add_argument("--seconds", type=float, default=40.0, help="policy time per episode (sim seconds, lockstep)")
     ap.add_argument("--seed0", type=int, default=10_000)
     ap.add_argument("--video-dir", default=None)
+    ap.add_argument("--full-video", action="store_true", help="30 fps front + third-person video of every control step")
+    ap.add_argument("--seeds", default=None, help="comma-separated seeds to run (overrides --episodes/--seed0)")
     ap.add_argument("--out", default=None, help="results JSON (default: <video-dir>/results.json)")
     a = ap.parse_args(argv)
 
     eng = SimEngine(scene="candy")
     eng.start()
     port = int(a.policy_server.rsplit(":", 1)[1])
-    runner_kw = dict(server_address=a.policy_server, checkpoint=os.path.expanduser(a.checkpoint),
+    ckpt = os.path.expanduser(a.checkpoint)
+    cfg_path = Path(ckpt) / "config.json"
+    policy_type = a.policy_type or (json.loads(cfg_path.read_text())["type"] if cfg_path.exists() else "pi0_fast")
+    runner_kw = dict(server_address=a.policy_server, checkpoint=ckpt, policy_type=policy_type,
                      load_timeout=300.0, blocked_by=lambda: other_policy_clients(port))  # yield to the 1080
     video_dir = Path(os.path.expanduser(a.video_dir)) if a.video_dir else None
-    episodes = Episodes(eng, runner_kw)
+    episodes = Episodes(eng, runner_kw, full_video=a.full_video)
     log = lambda msg: print(msg, flush=True)
     results = []
     try:
         for i, task in enumerate(a.tasks.split(",")):
+            if a.seeds:  # explicit seeds, e.g. to film particular episodes
+                for seed in map(int, a.seeds.split(",")):
+                    vid = video_dir / f"{task}_{seed}.mp4" if video_dir else None
+                    res = episodes.run(task, seed, a.seconds, vid, log)
+                    if res is not None:
+                        results.append(res)
+                continue
             seed, done = a.seed0 + 1000 * i, 0  # each task its own seeds (else the same candy every time)
             while done < a.episodes:
                 seed += 1

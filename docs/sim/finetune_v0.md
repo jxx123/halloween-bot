@@ -7,7 +7,7 @@ pick_place and give_human) and evaluate it closed-loop in the twin.
 
 - **Training venv:** `~/pi-train`: lerobot 0.6.1, peft, and the 1080's two tokenizer shims, copied by
   tmpfile + rename. `~/pi-serve` is never touched.
-- **Training:** `tools/finetune_pi0fast.py`:
+- **Training:** `tools/finetune_pi.py`:
   - LoRA r=16, alpha=32, on the Gemma language model's attention and MLP projections (20M trainable
     params). LR 2e-4, warmup 500, cosine decay, batch 4, bf16, gradient checkpointing.
   - Offline, GPU memory capped at 42%, so it trains next to the live :8081 server.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
-"""LoRA fine-tune of the pi0-FAST SO101 checkpoint on a LeRobot dataset, on the 5090 next to the live policy
-server (:8081, ~16 GB).
+"""LoRA fine-tune of a pi policy on a LeRobot dataset, on the 5090 next to the live policy server
+(:8081, ~16 GB):
+  --policy pi0_fast: the SO101 pi0-FAST checkpoint the rig serves (FAST action tokens)
+  --policy pi05:     the official lerobot/pi05_base (flow matching: no action tokenizer, no shims)
 
 - Run it with the separate training venv ~/pi-train (lerobot 0.6.1 + peft), NEVER ~/pi-serve (its
   site-packages carry the serving shims and must not change).
@@ -9,7 +11,7 @@ server (:8081, ~16 GB).
 - Caps this process's GPU memory so the policy server keeps what it needs.
 - Maps the rig camera names (overhead/left_wrist/right_wrist) onto the checkpoint's (base_0_rgb/...).
 
-    ~/pi-train/.venv/bin/python tools/finetune_pi0fast.py --repo-id local/sim_candy_v0 \\
+    ~/pi-train/.venv/bin/python tools/finetune_pi.py --policy pi05 --repo-id local/sim_candy_v0 \\
         --dataset-root ~/lerobot/outputs/datasets/sim_candy_v0 --steps 3000 \\
         --out ~/lerobot/outputs/train/pi0fast_sim_candy_v0
 """
@@ -18,12 +20,20 @@ import json
 import os
 import sys
 
-CHECKPOINT = "delvingdeep/pi0fast-so101-bimanual"
+BASES = {"pi0_fast": "delvingdeep/pi0fast-so101-bimanual", "pi05": "lerobot/pi05_base"}
+CHECKPOINT = BASES["pi0_fast"]
 RENAME = {"observation.images.overhead": "observation.images.base_0_rgb",
           "observation.images.left_wrist": "observation.images.left_wrist_0_rgb",
           "observation.images.right_wrist": "observation.images.right_wrist_0_rgb"}
-# the Gemma language model's attention + MLP projections (pi0_fast defines no default LoRA targets)
-LORA_TARGETS = r".*paligemma\.model\.language_model\..*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
+LORA_TARGETS = {
+    # the Gemma language model's attention + MLP projections (pi0_fast defines no default LoRA targets)
+    "pi0_fast": r".*paligemma\.model\.language_model\..*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)",
+    # the action expert's attention + MLP, the language model's q/v (grounding "which candy" in the images), and
+    # the action/time projections (lerobot's pi05 default uses pi0's names and misses time_mlp_in/out)
+    "pi05": (r"(.*\.gemma_expert\..*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
+             r"|.*paligemma\.model\.language_model\..*\.(q_proj|v_proj)"
+             r"|model\.(action_in_proj|action_out_proj|time_mlp_in|time_mlp_out))"),
+}
 
 
 def local_base(dest: str) -> str:
@@ -54,6 +64,7 @@ def local_base(dest: str) -> str:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--policy", choices=tuple(BASES), default="pi0_fast")
     ap.add_argument("--repo-id")
     ap.add_argument("--dataset-root")
     ap.add_argument("--out")
@@ -84,7 +95,8 @@ def main(argv=None):
         return train_main()
     if not (a.repo_id and a.dataset_root and a.out):
         ap.error("--repo-id, --dataset-root and --out are required (unless --resume)")
-    base = local_base(a.base_dir)
+    # pi0_fast: a local view of the cached checkpoint with the baked FAST tokenizer; pi05 needs none of that
+    base = local_base(a.base_dir) if a.policy == "pi0_fast" else BASES[a.policy]
 
     sys.argv = ["lerobot-train",
                 f"--dataset.repo_id={a.repo_id}", f"--dataset.root={os.path.expanduser(a.dataset_root)}",
@@ -92,7 +104,7 @@ def main(argv=None):
                 "--policy.dtype=bfloat16", "--policy.gradient_checkpointing=true", "--policy.push_to_hub=false",
                 f"--policy.optimizer_lr={a.lr}", f"--policy.scheduler_warmup_steps={a.warmup}",
                 f"--policy.scheduler_decay_steps={a.steps}", f"--policy.scheduler_decay_lr={a.lr / 10}",
-                "--peft.method_type=LORA", f"--peft.r={a.rank}", f"--peft.lora_alpha={a.lora_alpha}", f"--peft.target_modules={LORA_TARGETS}",
+                "--peft.method_type=LORA", f"--peft.r={a.rank}", f"--peft.lora_alpha={a.lora_alpha}", f"--peft.target_modules={LORA_TARGETS[a.policy]}",
                 "--peft.full_training_modules=[]",
                 f"--batch_size={a.batch_size}", f"--steps={a.steps}", f"--save_freq={a.save_freq}",
                 f"--num_workers={a.num_workers}", "--log_freq=25", "--wandb.enable=false",

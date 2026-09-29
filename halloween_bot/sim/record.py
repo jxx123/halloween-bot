@@ -94,7 +94,10 @@ def record(episodes: int, root, repo_id: str = "local/sim_pick_place", seed0: in
 
 
 def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=(480, 640), keep_failures=False,
-                 max_attempts: int | None = None, log=print, robot_type: str = ROBOT_TYPE) -> dict:
+                 max_attempts: int | None = None, log=print, robot_type: str = ROBOT_TYPE,
+                 balance: float | None = 1.6) -> dict:
+    """balance: cap each candy at this multiple of its fair share per task (success filtering otherwise
+    over-represents easy candy: v0 had 22 gumballs and 2 chocolate bars); None = no cap."""
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     from .candy_expert import TASKS, attempt
@@ -107,6 +110,13 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
     eng = SimEngine(scene="candy")
     per_task = {t: -(-episodes // len(tasks)) for t in tasks}  # ceil: episodes split across tasks
     saved, screened, results = {t: 0 for t in tasks}, {t: 0 for t in tasks}, []
+    from .candy import CANDIES
+    from .candy_expert import LONG
+    per_candy: dict[tuple[str, str], int] = {}
+
+    def quota(task: str) -> float:
+        pool = LONG if task == "handover" else list(CANDIES)
+        return float("inf") if balance is None else max(1, -(-per_task[task] * balance // len(pool)))
     budget = max_attempts or 40 * episodes
     seed, t0 = seed0, time.time()
     try:
@@ -117,6 +127,8 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
             probe = attempt(eng, task, seed)  # headless: cheap, and exactly what the rendered run will do
             if probe is None or not (probe["success"] or keep_failures):
                 continue
+            if per_candy.get((task, probe["candy"]), 0) >= quota(task):
+                continue  # this candy already has its share for this task
 
             def tick(action: dict):
                 obs = eng.read_positions()
@@ -132,12 +144,14 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
                 raise RuntimeError(f"seed {seed}: rendered run diverged from the headless probe")
             ds.save_episode()
             saved[task] += 1
+            per_candy[(task, res["candy"])] = per_candy.get((task, res["candy"]), 0) + 1
             results.append({"seed": seed, **res})
             log(f"[{sum(saved.values())}/{episodes}] seed {seed} {task}: {res['instruction']} "
                 f"({res['arm']} arm, {res['frames']} frames)")
     finally:
         ds.finalize()
     stats = {"saved": saved, "screened": screened,
+             "per_candy": {f"{t}/{c}": n for (t, c), n in sorted(per_candy.items())},
              "yield": {t: round(saved[t] / max(1, screened[t]), 3) for t in tasks},
              "seconds": round(time.time() - t0, 1), "root": str(root), "results": results}
     (Path(root) / "meta" / "sim_record.json").write_text(json.dumps(stats, indent=2))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Quick sanity check of a pi0-FAST checkpoint on its training data, without the sim or a policy server:
+"""Quick sanity check of a pi0-FAST / pi05 checkpoint on its training data, without the sim or a policy server:
 predict the action chunk at a few frames and print it next to the demo's (right arm; --arm left).
 A model that has learned the demos tracks them; one that hasn't predicts "stay put" or nonsense.
 
@@ -30,10 +30,13 @@ def main(argv=None):
         torch.cuda.set_per_process_memory_fraction(a.mem_fraction)
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.factory import make_pre_post_processors
-    from lerobot.policies.pi0_fast.modeling_pi0_fast import PI0FastPolicy
+    import json
+
+    from lerobot.policies.factory import get_policy_class
 
     ckpt = os.path.expanduser(a.checkpoint)
-    policy = PI0FastPolicy.from_pretrained(ckpt).to(a.device).eval()
+    kind = json.load(open(os.path.join(ckpt, "config.json")))["type"]
+    policy = get_policy_class(kind).from_pretrained(ckpt).to(a.device).eval()
     policy.config.device = a.device
     pre, post = make_pre_post_processors(policy.config, pretrained_path=ckpt,
                                          preprocessor_overrides={"device_processor": {"device": a.device}})
