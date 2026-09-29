@@ -27,6 +27,7 @@ pick_place and give_human) and evaluate it closed-loop in the twin.
 | alpha 8, LR 1e-4 | 5.7k (stopped) | 2.33 | 29.0 | – | – |
 | **alpha 32, LR 2e-4** | **20k** (~1.7 epochs) | **7.7 → 0.95** | **10.9** (mid-reach 1–2) | **0/10** | **0/10** |
 | **π₀.₅ (lerobot/pi05_base)**, alpha 32, LR 2e-4 | 20k | 0.16 → 0.034 (flow MSE) | 9.3 (start of reach 9.7 vs 34.6) | 0/10 | 0/10 |
+| **π₀.₅ on sim_candy_v1** (1000 eps) | 40k | 0.32 → 0.054 | 8.7–9.2 | 0/10 (0/4 on training seeds) | 0/10 |
 
 With the 20k model the arm moves in 18/20 sim episodes. It reaches into the bowl toward the named
 candy, misses the grasp, and returns to rest. It has learned the shape of the task but not
@@ -49,10 +50,21 @@ the grasp. π₀.₅ needs no FAST tokenizer or shims: it trains from `lerobot/p
 - **Decode spikes.** A malformed token can decode to a huge value (seen once: lift 68,529). The
   per-tick ±20 clamp and the joint limits contain it, in sim and on the real server.
 
+## Serving bug (found 2026-09-29, fixed in commit 0228fe0)
+
+lerobot's async policy server (`async_inference/helpers.resize_robot_observation_image`) resizes every incoming
+image straight to 224×224, stretching our 4:3 frames. In training the policy letterboxes them itself
+(`resize_with_pad`: aspect kept, 28 black rows top and bottom), and it skips that step when serving because the
+shape already matches. So every served policy above saw squashed images it never trained on.
+`policy_runner.letterbox()` reproduces resize_with_pad exactly, and the sim server and eval now send letterboxed
+224×224 frames. The rows above were measured before the fix. With the fix, π₀.₅ v1 is still 0/4 on training
+seeds: on those exact frames it predicts the right reach offline, but served it often samples "both arms
+wait". The right arm rests in about half the demos (left-arm episodes), so the arm choice is the weak mode.
+
 ## Next
 
-- **In progress (2026-09-29):** π₀.₅ on `sim_candy_v1`. 1000 balanced episodes (≤73 per candy per task),
-  464k frames, 40k steps.
+- **v2 data:** consistent arm choice (`record.py --arm-rule midline`); v1 had coin flips in 14.9% of episodes
+  and a moving bowl reference.
 
 - **More sim data:** ~1000 episodes (~2 h to record; the screening makes yield irrelevant), then a
   longer run. Precise grasping from 100 demos is optimistic.
