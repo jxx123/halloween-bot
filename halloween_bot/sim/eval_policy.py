@@ -66,10 +66,10 @@ class Episodes:
     """One PolicyRunner for the whole evaluation (it instructs the server once, so the model loads once);
     the observation hook drives whichever episode is current."""
 
-    def __init__(self, eng: SimEngine, runner_kw: dict, full_video: bool = False):
-        self.eng, self.world, self.writer = eng, None, None
+    def __init__(self, eng: SimEngine, runner_kw: dict, full_video: bool = False, pad: bool = True):
+        self.eng, self.world, self.writer, self.pad = eng, None, None, pad
         self.full_video, self._tls, self.caption = full_video, threading.local(), ""
-        self.runner = PolicyRunner(self._observe, self._send, KEYS, policy_features(), pause=eng.pause,
+        self.runner = PolicyRunner(self._observe, self._send, KEYS, policy_features(pad), pause=eng.pause,
                                    resume=eng.resume, **runner_kw)
 
     def _send(self, action: dict):
@@ -91,9 +91,9 @@ class Episodes:
     def _observe(self):
         if self.world is not None:
             self.world.tick()
-        obs = policy_observation(self.eng)
+        obs = policy_observation(self.eng, pad=self.pad)
         if self.writer is not None and not self.full_video:
-            self.writer.write(cv2.cvtColor(obs[PI0FAST_CAMERAS["overhead"]], cv2.COLOR_RGB2BGR))
+            self.writer.write(cv2.cvtColor(cv2.resize(obs[PI0FAST_CAMERAS["overhead"]], (640, 480)), cv2.COLOR_RGB2BGR))
         return obs
 
     def run(self, task: str, seed: int, seconds: float, video: Path | None, log=print) -> dict | None:
@@ -147,6 +147,8 @@ def main(argv=None):
     ap.add_argument("--seconds", type=float, default=40.0, help="policy time per episode (sim seconds, lockstep)")
     ap.add_argument("--seed0", type=int, default=10_000)
     ap.add_argument("--video-dir", default=None)
+    ap.add_argument("--no-pad", action="store_true",
+                    help="send 640x480 frames (the async server then stretches them to 224x224: the old, wrong behaviour)")
     ap.add_argument("--full-video", action="store_true", help="30 fps front + third-person video of every control step")
     ap.add_argument("--seeds", default=None, help="comma-separated seeds to run (overrides --episodes/--seed0)")
     ap.add_argument("--out", default=None, help="results JSON (default: <video-dir>/results.json)")
@@ -161,7 +163,7 @@ def main(argv=None):
     runner_kw = dict(server_address=a.policy_server, checkpoint=ckpt, policy_type=policy_type,
                      load_timeout=300.0, blocked_by=lambda: other_policy_clients(port))  # yield to the 1080
     video_dir = Path(os.path.expanduser(a.video_dir)) if a.video_dir else None
-    episodes = Episodes(eng, runner_kw, full_video=a.full_video)
+    episodes = Episodes(eng, runner_kw, full_video=a.full_video, pad=not a.no_pad)
     log = lambda msg: print(msg, flush=True)
     results = []
     try:
