@@ -62,6 +62,19 @@ class World:
         return C.in_hand(m, d, name) if self.task == "give_human" else C.on_plate(m, d, name)
 
 
+def smoothness(sent: list, hz: float = 30.0) -> dict:
+    """How the arms were driven: idle = share of the run with no action to send (queue empty, the robot just
+    holds), jumps = step-to-step command changes (units; chunk-boundary jerks show as the max / p99)."""
+    if len(sent) < 3:
+        return {"idle_frac": None, "jump_max": None, "jump_p99": None}
+    t = np.array([s[0] for s in sent])
+    a = np.stack([s[1] for s in sent])
+    span = t[-1] - t[0]
+    jumps = np.abs(np.diff(a, axis=0)).max(axis=1)
+    return {"idle_frac": round(float(max(0.0, 1 - (len(sent) - 1) / (span * hz))), 3) if span > 0 else None,
+            "jump_max": round(float(jumps.max()), 1), "jump_p99": round(float(np.percentile(jumps, 99)), 1)}
+
+
 class Episodes:
     """One PolicyRunner for the whole evaluation (it instructs the server once, so the model loads once);
     the observation hook drives whichever episode is current."""
@@ -69,10 +82,12 @@ class Episodes:
     def __init__(self, eng: SimEngine, runner_kw: dict, full_video: bool = False, pad: bool = True):
         self.eng, self.world, self.writer, self.pad = eng, None, None, pad
         self.full_video, self._tls, self.caption = full_video, threading.local(), ""
+        self.sent: list[tuple[float, np.ndarray]] = []  # (wall time, action) per executed step: smoothness metrics
         self.runner = PolicyRunner(self._observe, self._send, KEYS, policy_features(pad), pause=eng.pause,
                                    resume=eng.resume, **runner_kw)
 
     def _send(self, action: dict):
+        self.sent.append((time.perf_counter(), np.array([action[k] for k in KEYS])))
         out = self.eng.send_action(action)
         if self.full_video and self.writer is not None:  # every control step: a real-time 30 fps video
             tl = self._tls
@@ -96,7 +111,7 @@ class Episodes:
             self.writer.write(cv2.cvtColor(cv2.resize(obs[PI0FAST_CAMERAS["overhead"]], (640, 480)), cv2.COLOR_RGB2BGR))
         return obs
 
-    def run(self, task: str, seed: int, seconds: float, video: Path | None, log=print) -> dict | None:
+    def run(self, task: str, seed: int, seconds: float, video: Path | None, log=print, realtime: bool = False) -> dict | None:
         eng = self.eng
         rng = np.random.default_rng(seed)
         eng.pause()
@@ -114,7 +129,8 @@ class Episodes:
             self.caption = f"{ep['instruction']}  (seed {seed})"
         eng.resume()
         t0 = time.time()
-        self.runner.start(ep["instruction"], seconds=seconds, lockstep=True)
+        self.sent = []
+        self.runner.start(ep["instruction"], seconds=seconds, lockstep=not realtime)
         ok_for = 0.0
         while self.runner.running:
             time.sleep(0.25)
@@ -130,7 +146,7 @@ class Episodes:
             self.writer = None
         res = {"seed": seed, "task": task, "candy": ep["candy"], "instruction": ep["instruction"],
                "success": bool(self.world.success()), "phase": status.get("phase"), "error": status.get("error"),
-               "chunks": status.get("chunks"), "wall_s": round(time.time() - t0, 1),
+               "chunks": status.get("chunks"), "wall_s": round(time.time() - t0, 1), **smoothness(self.sent),
                "candy_end": [round(float(v), 3) for v in eng.data.xpos[eng.model.body(ep["candy"]).id]]}
         self.world = None
         log(json.dumps(res))
@@ -147,6 +163,8 @@ def main(argv=None):
     ap.add_argument("--seconds", type=float, default=40.0, help="policy time per episode (sim seconds, lockstep)")
     ap.add_argument("--seed0", type=int, default=10_000)
     ap.add_argument("--video-dir", default=None)
+    ap.add_argument("--realtime", action="store_true",
+                    help="physics keeps running while the policy infers (like the real arms); default: lockstep")
     ap.add_argument("--no-pad", action="store_true",
                     help="send 640x480 frames (the async server then stretches them to 224x224: the old, wrong behaviour)")
     ap.add_argument("--full-video", action="store_true", help="30 fps front + third-person video of every control step")
@@ -171,7 +189,7 @@ def main(argv=None):
             if a.seeds:  # explicit seeds, e.g. to film particular episodes
                 for seed in map(int, a.seeds.split(",")):
                     vid = video_dir / f"{task}_{seed}.mp4" if video_dir else None
-                    res = episodes.run(task, seed, a.seconds, vid, log)
+                    res = episodes.run(task, seed, a.seconds, vid, log, realtime=a.realtime)
                     if res is not None:
                         results.append(res)
                 continue
@@ -179,7 +197,7 @@ def main(argv=None):
             while done < a.episodes:
                 seed += 1
                 vid = video_dir / f"{task}_{seed}.mp4" if video_dir else None
-                res = episodes.run(task, seed, a.seconds, vid, log)
+                res = episodes.run(task, seed, a.seconds, vid, log, realtime=a.realtime)
                 if res is not None:
                     results.append(res)
                     done += 1
