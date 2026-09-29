@@ -37,6 +37,11 @@ TILT_WEIGHT = 0.06  # IK weight of that lean: a soft preference (position first;
 FWD_WEIGHT = 0.12  # IK weight of B's claws-forward reach (it must stay roughly level to slide in along the candy)
 BASE_XY = {"left": np.array([0.0, 0.175]), "right": np.array([0.0, -0.175])}
 TASKS = ("pick_place", "handover", "give_human")
+# which arm picks: "bowl" = side of the jittered bowl centre + a coin flip within 1 cm (sim_candy_v0/v1: ~15% of
+# demos then teach two answers for one picture); "midline" = side of the table's fixed centre line, the right arm
+# for anything within MIDLINE_TIE of it (a consistent rule, like a person's)
+ARM_RULES = ("bowl", "midline")
+MIDLINE_TIE = 0.015
 LONG = [n for n, c in C.CANDIES.items() if c["handover"] is not None]  # long enough for two grippers
 
 
@@ -58,8 +63,11 @@ def other(side: str) -> str:
 class CandyExpert(Expert):
     grasp_gap = OPEN
 
-    def __init__(self, engine: SimEngine, hz: float = 30.0):
+    def __init__(self, engine: SimEngine, hz: float = 30.0, arm_rule: str = "bowl"):
         super().__init__(engine, hz)
+        if arm_rule not in ARM_RULES:
+            raise ValueError(f"arm_rule must be one of {ARM_RULES}")
+        self.arm_rule = arm_rule
         self.instruction = ""
         self._tips = {s: (self.m.geom(f"{s}_fixed_jaw_sph_tip1").id, self.m.geom(f"{s}_moving_jaw_sph_tip1").id)
                       for s in SIDES}
@@ -325,8 +333,11 @@ class CandyExpert(Expert):
             raise NoCandy(f"no pickable candy for {task} in the bowl: {in_bowl}")
         name = str(rng.choice(sorted(pool)))
         p, _ = C.candy_pose(m, d, name)
-        bowl_y = self.eng.layout["bowl"][1]
-        side = ("right" if p[1] < bowl_y else "left") if abs(p[1] - bowl_y) > 0.01 else str(rng.choice(SIDES))
+        if self.arm_rule == "midline":  # the table's fixed centre line; near it always the right arm (no coin flips)
+            side = "left" if p[1] > MIDLINE_TIE else "right"
+        else:  # v0/v1 data: the candy's side of the (jittered) bowl centre, a coin flip within 1 cm of it
+            bowl_y = self.eng.layout["bowl"][1]
+            side = ("right" if p[1] < bowl_y else "left") if abs(p[1] - bowl_y) > 0.01 else str(rng.choice(SIDES))
         ep = {"task": task, "candy": name, "arm": side}
         if task in ("pick_place", "handover"):
             placer = side if task == "pick_place" else other(side)
@@ -468,13 +479,13 @@ class CandyExpert(Expert):
         return bool(c[2] > 0.08 and np.linalg.norm(c - self.tip(b)) < 0.07)
 
 
-def attempt(eng: SimEngine, task: str, seed: int, on_tick=None) -> dict | None:
+def attempt(eng: SimEngine, task: str, seed: int, on_tick=None, arm_rule: str = "bowl") -> dict | None:
     """One seeded episode from reset: deterministic, so a headless run predicts a rendered one exactly.
     None when the layout has no candy the task can use."""
     rng = np.random.default_rng(seed)
     include = str(rng.choice(LONG)) if task == "handover" else None
     eng.reset(randomize=True, seed=seed, include=include)
-    ex = CandyExpert(eng)
+    ex = CandyExpert(eng, arm_rule=arm_rule)
     try:
         ep = ex.setup(task, rng)
     except NoCandy:

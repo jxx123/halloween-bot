@@ -48,10 +48,10 @@ def features(image_hw: tuple[int, int]) -> dict:
 def record(episodes: int, root, repo_id: str = "local/sim_pick_place", seed0: int = 0, task: str = DEFAULT_TASK,
            image_hw: tuple[int, int] = (480, 640), keep_failures: bool = False, max_attempts: int | None = None,
            log=print, scene: str = "toys", tasks: tuple[str, ...] = ("pick_place",),
-           robot_type: str = ROBOT_TYPE) -> dict:
+           robot_type: str = ROBOT_TYPE, arm_rule: str = "bowl") -> dict:
     if scene == "candy":
         return record_candy(episodes, root, repo_id, seed0, tasks, image_hw, keep_failures, max_attempts, log,
-                            robot_type)
+                            robot_type, arm_rule=arm_rule)
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     ds = LeRobotDataset.create(repo_id=repo_id, fps=FPS, features=features(image_hw), root=root,
@@ -95,7 +95,7 @@ def record(episodes: int, root, repo_id: str = "local/sim_pick_place", seed0: in
 
 def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=(480, 640), keep_failures=False,
                  max_attempts: int | None = None, log=print, robot_type: str = ROBOT_TYPE,
-                 balance: float | None = 1.6) -> dict:
+                 balance: float | None = 1.6, arm_rule: str = "bowl") -> dict:
     """balance: cap each candy at this multiple of its fair share per task (success filtering otherwise
     over-represents easy candy: v0 had 22 gumballs and 2 chocolate bars); None = no cap."""
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -124,7 +124,7 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
             task = min((t for t in tasks if saved[t] < per_task[t]), key=lambda t: saved[t])
             seed += 1
             screened[task] += 1
-            probe = attempt(eng, task, seed)  # headless: cheap, and exactly what the rendered run will do
+            probe = attempt(eng, task, seed, arm_rule=arm_rule)  # headless: cheap, and exactly what the rendered run will do
             if probe is None or not (probe["success"] or keep_failures):
                 continue
             if per_candy.get((task, probe["candy"]), 0) >= quota(task):
@@ -138,7 +138,7 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
                     frame[f"observation.images.{cam}"] = fit_image(eng.get_frame(cam), image_hw)
                 ds.add_frame(frame)
 
-            res = attempt(eng, task, seed, on_tick=tick)
+            res = attempt(eng, task, seed, on_tick=tick, arm_rule=arm_rule)
             if res["success"] != probe["success"] or res["frames"] != probe["frames"]:
                 ds.clear_episode_buffer()
                 raise RuntimeError(f"seed {seed}: rendered run diverged from the headless probe")
@@ -150,7 +150,7 @@ def record_candy(episodes: int, root, repo_id: str, seed0: int, tasks, image_hw=
                 f"({res['arm']} arm, {res['frames']} frames)")
     finally:
         ds.finalize()
-    stats = {"saved": saved, "screened": screened,
+    stats = {"saved": saved, "screened": screened, "arm_rule": arm_rule,
              "per_candy": {f"{t}/{c}": n for (t, c), n in sorted(per_candy.items())},
              "yield": {t: round(saved[t] / max(1, screened[t]), 3) for t in tasks},
              "seconds": round(time.time() - t0, 1), "root": str(root), "results": results}
@@ -168,13 +168,15 @@ def main(argv=None):
     ap.add_argument("--keep-failures", action="store_true")
     ap.add_argument("--scene", choices=("toys", "candy"), default="toys")
     ap.add_argument("--tasks", default="pick_place,give_human", help="candy scene: comma-separated, cycled")
+    ap.add_argument("--arm-rule", choices=("bowl", "midline"), default="bowl",
+                    help="candy scene: which arm the demonstrator uses (midline = consistent, no coin flips)")
     ap.add_argument("--robot-type", default=ROBOT_TYPE,
                     help="dataset robot_type; use the real rig's to merge with real recordings (aggregate_datasets checks it)")
     a = ap.parse_args(argv)
     if Path(a.root).exists():
         raise SystemExit(f"{a.root} exists; pick a new --root (LeRobot datasets are created fresh)")
     stats = record(a.episodes, a.root, a.repo_id, a.seed, a.task, keep_failures=a.keep_failures, scene=a.scene,
-                   tasks=tuple(t for t in a.tasks.split(",") if t), robot_type=a.robot_type)
+                   tasks=tuple(t for t in a.tasks.split(",") if t), robot_type=a.robot_type, arm_rule=a.arm_rule)
     print(json.dumps({k: v for k, v in stats.items() if k != "results"}, indent=2))
 
 

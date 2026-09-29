@@ -123,3 +123,20 @@ def test_eval_world_brings_the_hand_in_once_the_candy_is_lifted(eng):
     target = d.mocap_pos[int(m.body_mocapid[m.body("hand_target").id])]
     assert np.linalg.norm(target - ep["hand"]) < 1e-6  # reached in all the way
     assert not world.success()
+
+
+def test_midline_arm_rule_is_deterministic_by_table_side(eng):
+    from halloween_bot.sim.candy_expert import MIDLINE_TIE
+
+    seen = []
+    for seed in range(12):
+        eng.reset(randomize=True, seed=seed)
+        ex = CandyExpert(eng, arm_rule="midline")
+        try:
+            ep = ex.setup("pick_place", np.random.default_rng(seed))
+        except Exception:
+            continue
+        y = C.candy_pose(eng.model, eng.data, ep["candy"])[0][1]
+        assert ep["arm"] == ("left" if y > MIDLINE_TIE else "right")
+        seen.append(ep["arm"])
+    assert {"left", "right"} <= set(seen)
