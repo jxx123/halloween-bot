@@ -7,9 +7,9 @@
 #
 # Usage:
 #   ./candy_record.sh                                  # 1 pick_place demo, chocolate bar
-#   TASK=pick_place CANDY="candy corn" N=20 ./candy_record.sh
-#   TASK=give_human CANDY="lollipop"   N=20 ./candy_record.sh
-#   TASK=handover   CANDY="gummy bear" N=10 ./candy_record.sh   # the hard one — most valuable
+#   TASK=pick_place N=20 ./candy_record.sh          # any-candy: grab whichever is convenient
+#   TASK=give_human N=20 ./candy_record.sh
+#   TASK=handover   N=10 ./candy_record.sh          # the hard one — most valuable
 #
 # REQUIRES the halloween_bot robot server STOPPED first (it owns the buses + cameras):
 #   pkill -f 'halloween_bot.serve[r]'
@@ -27,9 +27,9 @@ EPISODE_TIME="${EPISODE_TIME:-30}"
 RESET_TIME="${RESET_TIME:-10}"
 
 case "$TASK" in
-  pick_place) SENTENCE="Pick up the ${CANDY} and put it on the plate." ;;
-  give_human) SENTENCE="Give the ${CANDY} to the person." ;;
-  handover)   SENTENCE="Pick up the ${CANDY}, hand it to the other arm, and put it on the plate." ;;
+  pick_place) SENTENCE="Put a candy on the plate." ;;
+  give_human) SENTENCE="Give a candy to the person." ;;
+  handover)   SENTENCE="Pick up a candy, hand it to the other arm, and put it on the plate." ;;
   *) echo "TASK must be pick_place | give_human | handover" >&2; exit 2 ;;
 esac
 
