@@ -17,6 +17,7 @@ Built on upstream lerobot >= 0.6.1 (`bi_so_follower` / `bi_so_leader`).
 Start via:  python -m halloween_bot.ctl start   (refuses to run while teleop/record own the buses)
 """
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -379,10 +380,13 @@ def main():
         list(robot.action_features),
         {**{k: float for k in robot.action_features},
          **{f: (POLICY_IMAGE_SIZE, POLICY_IMAGE_SIZE, 3) for f in PI0FAST_CAMERAS.values()}},
-        server_address="127.0.0.1:8080",  # serve_5090.sh tunnel to the OMEN policy server
+        server_address="127.0.0.1:8080",  # local tunnel endpoint -> 5090 policy server
+        checkpoint=os.environ.get("POLICY_CHECKPOINT", "delvingdeep/pi0fast-so101-bimanual"),
+        policy_type=os.environ.get("POLICY_TYPE", "pi0_fast"),
         blocked_by=sim_holds_policy_server,
     )
-    print("pi policy runner mounted: POST /policy {task, seconds}", flush=True)
+    print(f"pi policy runner mounted: POST /policy {{task, seconds}} | "
+          f"type={runner.policy_type} ckpt={runner.checkpoint}", flush=True)
     # Bind localhost plus the tailnet address (if up) — never the plain LAN.
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     extra_hosts = []
