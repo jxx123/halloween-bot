@@ -1,4 +1,16 @@
 {
+  "joint_offsets_deg": {
+    "left": {
+      "shoulder_lift": -3.41,
+      "elbow_flex": -1.3,
+      "wrist_flex": -7.08
+    },
+    "right": {
+      "shoulder_lift": -3.36,
+      "elbow_flex": -1.47,
+      "wrist_flex": 3.81
+    }
+  },
   "overhead_camera": {
     "pos": [
       0.474639597277603,
@@ -13,19 +25,84 @@
     ]
   },
   "fit": {
-    "what": "overhead camera only, re-fit 2026-09-26 to the lit overlay photos (~/sim_ref/overlay/*) with the arm model unchanged: blue-arm silhouette IoU 0.345 -> 0.643. The C922 was bumped during the rig visit that morning.",
-    "camera_delta": {
-      "pos_m": [
-        0.0346,
-        -0.0308,
-        -0.0346
-      ],
-      "rot_deg": [
-        7.2,
-        0.61,
-        -0.03
-      ]
-    },
-    "arm_geometry": "unchanged: kincal fits of the table contacts conflict with the wrist-camera evidence; see docs/sim/kincal_status.md"
+    "what": "per-arm lift/elbow/wrist_flex offsets on the range-middle zero, fit 2026-09-27 to ruler heights (elbow axis, wrist-flex axis, fixed-jaw tip above the tabletop) at measurement poses P0 (all zero) and P1 (elbow 20), both arms, reached states; stock link lengths. 12 heights, max residual 3.5 mm.",
+    "measurements": "~/sim_ref/measurements.json (1080 format) -> card schema; kincal measured",
+    "points_mm": [
+      {
+        "side": "left",
+        "point": "elbow_flex",
+        "measured_mm": 231.0,
+        "fit_mm": 230.5
+      },
+      {
+        "side": "right",
+        "point": "elbow_flex",
+        "measured_mm": 231.0,
+        "fit_mm": 230.4
+      },
+      {
+        "side": "left",
+        "point": "wrist_flex",
+        "measured_mm": 239.0,
+        "fit_mm": 237.7
+      },
+      {
+        "side": "right",
+        "point": "wrist_flex",
+        "measured_mm": 238.0,
+        "fit_mm": 237.4
+      },
+      {
+        "side": "left",
+        "point": "tip",
+        "measured_mm": 270.0,
+        "fit_mm": 269.0
+      },
+      {
+        "side": "right",
+        "point": "tip",
+        "measured_mm": 241.0,
+        "fit_mm": 237.6
+      },
+      {
+        "side": "left",
+        "point": "elbow_flex",
+        "measured_mm": 230.0,
+        "fit_mm": 230.1
+      },
+      {
+        "side": "right",
+        "point": "elbow_flex",
+        "measured_mm": 230.0,
+        "fit_mm": 230.2
+      },
+      {
+        "side": "left",
+        "point": "wrist_flex",
+        "measured_mm": 196.0,
+        "fit_mm": 197.4
+      },
+      {
+        "side": "right",
+        "point": "wrist_flex",
+        "measured_mm": 198.0,
+        "fit_mm": 198.6
+      },
+      {
+        "side": "left",
+        "point": "tip",
+        "measured_mm": 180.0,
+        "fit_mm": 181.0
+      },
+      {
+        "side": "right",
+        "point": "tip",
+        "measured_mm": 150.0,
+        "fit_mm": 153.5
+      }
+    ],
+    "before_mm": "at the reached states the unoffset model put the right wrist axis 12-14 mm and tip 12-19 mm LOW; left tip 43-46 mm low (orange wrist pitched up ~11 deg vs blue)",
+    "overhead_camera": "overhead camera only, re-fit 2026-09-26 to the lit overlay photos (~/sim_ref/overlay/*) with the arm model unchanged: blue-arm silhouette IoU 0.345 -> 0.643. The C922 was bumped during the rig visit that morning.",
+    "notes": "lift/elbow split is weakly determined at P0/P1 (upper arm near vertical); their sum (-4.8 deg) is what the heights pin. Silhouette IoU on 15 lit blue-arm photos unchanged (0.613 -> 0.611). Earlier table 'contacts' were elbow saturation, not claw-on-table: see docs/sim/kincal_status.md."
   }
 }

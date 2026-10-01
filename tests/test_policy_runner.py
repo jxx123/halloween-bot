@@ -264,3 +264,15 @@ def test_run_yields_when_another_client_appears():
     wait_done(r, 3)
     st = r.status()
     assert st["phase"] == "error" and "real robot connected" in st["error"]
+
+
+def test_letterbox_matches_the_policy_resize_with_pad():
+    """The async policy server stretches whatever it gets to 224x224; a letterboxed 224x224 frame is what the
+    policy itself makes of a 480x640 training frame (openpi resize_with_pad: aspect kept, centred black bars)."""
+    from halloween_bot.policy_runner import letterbox
+
+    img = np.full((480, 640, 3), 200, np.uint8)
+    out = letterbox(img)
+    assert out.shape == (224, 224, 3)
+    assert (out[:28] == 0).all() and (out[-28:] == 0).all()  # 640x480 -> 224x168, 28 rows of padding each side
+    assert (out[28:-28] == 200).all()

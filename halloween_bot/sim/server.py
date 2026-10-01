@@ -27,7 +27,8 @@ from urllib.parse import parse_qs, urlparse
 
 import cv2
 
-from ..policy_runner import PI0FAST_CAMERAS, PI0FAST_IMAGE_HW, PolicyRunner, fit_image, handle_http
+from ..policy_runner import (PI0FAST_CAMERAS, PI0FAST_IMAGE_HW, POLICY_IMAGE_SIZE, PolicyRunner, fit_image,
+                             handle_http, letterbox)
 from .calib import KEYS
 from .engine import SimEngine
 from .model import CAMERA_NAMES
@@ -36,11 +37,14 @@ PORT = 8399
 FRAMES_DIR = Path.home() / "lerobot/outputs/claude_robot/frames"
 
 
-def policy_observation(engine: SimEngine) -> dict:
-    """Joint state + the three rig cameras renamed/shaped the way the real pi0fast client sent them."""
+def policy_observation(engine: SimEngine, pad: bool = False) -> dict:
+    """Joint state + the three rig cameras renamed/shaped the way the real pi0fast client sent them.
+    pad=True letterboxes them to the policy resolution first, as the policy does to training frames
+    (see policy_runner.letterbox: the async server would otherwise stretch them)."""
     obs = engine.read_positions()
     for cam, feature in PI0FAST_CAMERAS.items():
-        obs[feature] = fit_image(engine.get_frame(cam))
+        img = fit_image(engine.get_frame(cam))
+        obs[feature] = letterbox(img) if pad else img
     return obs
 
 
@@ -63,8 +67,9 @@ def other_policy_clients(port: int) -> str | None:
             "real robot via the 1080 tunnel); one π run at a time")
 
 
-def policy_features() -> dict:
-    return {**{k: float for k in KEYS}, **{f: (*PI0FAST_IMAGE_HW, 3) for f in PI0FAST_CAMERAS.values()}}
+def policy_features(pad: bool = False) -> dict:
+    hw = (POLICY_IMAGE_SIZE, POLICY_IMAGE_SIZE) if pad else PI0FAST_IMAGE_HW
+    return {**{k: float for k in KEYS}, **{f: (*hw, 3) for f in PI0FAST_CAMERAS.values()}}
 
 
 def make_app(engine: SimEngine, runner=None, frames_dir: Path = FRAMES_DIR, on_stop=None):
@@ -201,14 +206,18 @@ def main(argv=None):
     ap.add_argument("--policy-server", default="127.0.0.1:8081",
                     help="lerobot policy_server for π (:8080 belongs to the 1080's real-robot client)")
     ap.add_argument("--no-policy", action="store_true")
+    ap.add_argument("--scene", choices=("toys", "candy"), default="toys",
+                    help="toys = basket + plush toys (what pi0-FAST knows); candy = candy bowl, plate, a person's hand")
     args = ap.parse_args(argv)
 
-    engine = SimEngine()
+    engine = SimEngine(scene=args.scene)
+    if args.scene == "candy":
+        engine.reset(randomize=True)
     engine.start()
     runner = None
     if not args.no_policy:
         policy_port = int(args.policy_server.rsplit(":", 1)[1])
-        runner = PolicyRunner(lambda: policy_observation(engine), engine.send_action, KEYS, policy_features(),
+        runner = PolicyRunner(lambda: policy_observation(engine, pad=True), engine.send_action, KEYS, policy_features(pad=True),
                               server_address=args.policy_server, pause=engine.pause, resume=engine.resume,
                               blocked_by=lambda: other_policy_clients(policy_port))
     servers: list[ThreadingHTTPServer] = []

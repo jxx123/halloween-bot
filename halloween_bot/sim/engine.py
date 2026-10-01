@@ -18,7 +18,7 @@ import mujoco
 import numpy as np
 
 from .calib import KEYS, SIDES, Calibration, clamp_norm, joint_name
-from .model import CAMERA_NAMES, CAMERA_SIZES, TOYS, build_model
+from .model import CAMERA_NAMES, CAMERA_SIZES, TOY_Z, TOYS, build_model
 
 MAX_RELATIVE_TARGET = 20.0
 CONTROL_HZ = 30
@@ -31,9 +31,11 @@ WANT_TTL = 3.0  # s a camera keeps being rendered after its last request
 
 class SimEngine:
     def __init__(self, model: mujoco.MjModel | None = None, calib: Calibration | None = None,
-                 render_hz: float = 15.0):
+                 render_hz: float = 15.0, scene: str = "toys"):
         self.calib = calib or Calibration.load()
-        self.model = model or build_model(calib=self.calib)
+        self.model = model or build_model(calib=self.calib, scene=scene)
+        self.candy = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "candy_bowl") >= 0
+        self.layout: dict = {}  # candy scene: what reset() put where
         self.data = mujoco.MjData(self.model)
         self.lock = threading.RLock()
         self.render_hz = render_hz
@@ -125,7 +127,8 @@ class SimEngine:
         with self.lock:
             mujoco.mj_step(self.model, self.data, nstep=n)
 
-    def reset(self, randomize: bool = False, seed: int | None = None):
+    def reset(self, randomize: bool = False, seed: int | None = None, include: str | None = None):
+        """Arms to rest, props re-placed (randomized with seed). Candy scene: include = a candy that must be in the bowl."""
         rng = np.random.default_rng(seed)
         with self.lock:
             mujoco.mj_resetData(self.model, self.data)
@@ -140,10 +143,14 @@ class SimEngine:
                 yaw = 0.0
                 if randomize:
                     x += rng.uniform(-0.04, 0.04)
-                    y += rng.uniform(-0.05, 0.05)
+                    y += rng.uniform(-0.03, 0.03)
                     yaw = rng.uniform(-np.pi, np.pi)
                 adr = self.model.jnt_qposadr[jid]
-                self.data.qpos[adr:adr + 7] = [x, y, 0.04, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+                self.data.qpos[adr:adr + 7] = [x, y, TOY_Z, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
+            if self.candy:
+                from .candy import reset_candy
+
+                self.layout = reset_candy(self.model, self.data, rng, randomize=randomize, include=include)
             mujoco.mj_forward(self.model, self.data)
             self._resync.set()  # inside the lock: the physics loop can't step on a stale clock anchor
 

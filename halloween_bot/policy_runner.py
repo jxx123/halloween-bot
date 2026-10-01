@@ -50,6 +50,31 @@ def fit_image(img: np.ndarray, hw: tuple[int, int] = PI0FAST_IMAGE_HW) -> np.nda
     return img if img.shape[:2] == hw else cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
 
 
+POLICY_IMAGE_SIZE = 224  # pi0 / pi0-FAST / pi05 image_resolution
+
+
+def letterbox(img: np.ndarray, size: int = POLICY_IMAGE_SIZE) -> np.ndarray:
+    """What the policy does to a training frame, done before sending: resize keeping the aspect ratio, then pad
+    centred with black to size x size (openpi/lerobot resize_with_pad_torch, same rounding and padding).
+
+    lerobot's async policy server resizes every incoming image straight to the policy resolution
+    (async_inference/helpers.resize_robot_observation_image), which stretches a 4:3 frame to 1:1. The policy's
+    own resize-with-pad then sees the right shape and does nothing, so a served policy sees squashed images it
+    never trained on. Sending an already-letterboxed size x size image makes the server's resize a no-op."""
+    import torch
+
+    h, w = img.shape[:2]
+    ratio = max(w / size, h / size)
+    rh, rw = int(h / ratio), int(w / ratio)
+    t = torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1)[None].float()
+    t = torch.nn.functional.interpolate(t, size=(rh, rw), mode="bilinear", align_corners=False)
+    resized = t.round().clamp(0, 255).to(torch.uint8)[0].permute(1, 2, 0).numpy()
+    out = np.zeros((size, size, img.shape[2]), np.uint8)
+    top, left = (size - rh) // 2, (size - rw) // 2
+    out[top:top + rh, left:left + rw] = resized
+    return out
+
+
 class PolicyBusy(RuntimeError):
     pass
 

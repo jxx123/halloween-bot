@@ -66,7 +66,7 @@ def cmd_start(args):
         print("server already running" + (" (sim)" if running_sim else ""))
         return
     Path(LOG).parent.mkdir(parents=True, exist_ok=True)
-    cmd = [PYTHON, "-m", "halloween_bot.sim.server"] if args.sim else [PYTHON, SERVER]
+    cmd = [PYTHON, "-m", "halloween_bot.sim.server", "--scene", args.scene] if args.sim else [PYTHON, SERVER]
     log_path = SIM_LOG if args.sim else LOG
     with open(log_path, "ab") as log:
         subprocess.Popen(["setsid", *cmd], stdout=log, stderr=log, start_new_session=True)
@@ -127,6 +127,8 @@ p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDes
 sub = p.add_subparsers(dest="cmd", required=True)
 sp = sub.add_parser("start")
 sp.add_argument("--sim", action="store_true", help="start the MuJoCo twin instead of the real robot")
+sp.add_argument("--scene", choices=("toys", "candy"), default="toys",
+                help="sim only: toys (basket + plush, what pi0-FAST knows) or candy (candy bowl, plate, a hand)")
 sp.set_defaults(fn=cmd_start)
 sub.add_parser("state").set_defaults(fn=cmd_state)
 mp = sub.add_parser("move")

@@ -38,7 +38,7 @@ def test_replay_shape_and_tracking():
 def test_fit_recovers_better_than_default():
     tr = synthetic_trace(TRUE)
     before = np.mean(list(rmse(build_model(params={}, props=False), CAL, [tr]).values()))
-    params = fit([tr], max_nfev=40)
+    params = fit([tr], fields=("kp", "kv"), max_nfev=80)  # TRUE differs only in kp/kv; 36 fields in 40 evals was one lucky step
     after = np.mean(list(rmse(build_model(params=params, props=False), CAL, [tr]).values()))
     assert after < before * 0.5
 
